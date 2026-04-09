@@ -1,0 +1,40 @@
+Metadata-Version: 2.4
+Name: mnemosyne
+Version: 0.1.0
+Summary: Local-first Obsidian vault assistant with CLI, TUI, and Telegram bot.
+Author-email: Your Name <you@example.com>
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: typer>=0.12
+Requires-Dist: rich>=13.0
+Requires-Dist: textual>=0.60
+Requires-Dist: python-telegram-bot>=20.0
+Requires-Dist: ollama>=0.3
+Requires-Dist: qdrant-client>=1.9
+Requires-Dist: python-frontmatter>=1.1
+Requires-Dist: pydantic>=2.0
+Requires-Dist: pydantic-settings>=2.0
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: pytest
+Requires-Dist: pytest-asyncio
+
+# Mnemosyne
+
+A local-first Obsidian vault assistant with CLI, TUI, and Telegram bot interfaces. All AI runs locally via Ollama. No cloud, no accounts, no lock-in.
+
+## Features
+- Natural language Q&A over your vault
+- Keyword and semantic search
+- Note creation and editing
+- Related note discovery
+- TUI chat interface
+- Telegram bot integration
+
+## Quickstart
+1. Clone this repo
+2. Copy `.env.example` to `.env` and edit paths
+3. Run `docker-compose up` to start Ollama and Qdrant
+4. Run `python -m mnemosyne.frontends.cli --help`
+
+## License
+MIT

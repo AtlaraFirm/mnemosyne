@@ -1,0 +1,6 @@
+agent
+db
+deploy
+frontends
+services
+tests

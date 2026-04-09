@@ -1,0 +1,13 @@
+[Unit]
+Description=Mnemosyne Vault CLI Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mnemosyne
+ExecStart=/opt/mnemosyne/.venv/bin/python -m mnemosyne.frontends.cli
+Restart=on-failure
+User=mnemosyne
+
+[Install]
+WantedBy=multi-user.target
