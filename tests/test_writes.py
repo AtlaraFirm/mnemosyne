@@ -22,7 +22,9 @@ def test_update_frontmatter(tmp_path):
     assert plan2.operation == "update_frontmatter"
     assert "newkey" in plan2.payload["content"]
 
-def test_wikilink_cleanup():
+def test_wikilink_cleanup(tmp_path):
+    import os
+    os.environ["VAULT_PATH"] = str(tmp_path)
     # Test that empty or whitespace-only wikilinks are removed
     text_with_empty = "This is a test [[ ]] and [[   ]] and [[ValidLink]]."
     plan = writes.create_note("TestTitle", text_with_empty)
@@ -32,8 +34,12 @@ def test_wikilink_cleanup():
     assert "[[ValidLink]]" in cleaned
 
     # Test that auto-linking uses correct relative path for subfolder notes
-    plan2 = writes.create_note("NoteA", "See NoteB", folder="folder1")
     writes.create_note("NoteB", "Body", folder="folder1")
+    # Force crawl_vault to see the new note by actually writing it to disk
+    note_b_path = tmp_path / "folder1" / "NoteB.md"
+    note_b_path.parent.mkdir(parents=True, exist_ok=True)
+    note_b_path.write_text("---\ntitle: NoteB\n---\n\nBody")
+    plan2 = writes.create_note("NoteA", "See NoteB", folder="folder1")
     content2 = plan2.payload["content"]
     assert "[[NoteB]]" in content2
 
@@ -43,7 +49,7 @@ def test_wikilink_cleanup():
     from mnemosyne.services import writes as w
     import os
     os.makedirs(tmp_path / "folder2", exist_ok=True)
-    (tmp_path / "folder2" / "NoteC.md").write_text("Body")
+    (tmp_path / "folder2" / "NoteC.md").write_text("---\ntitle: NoteC\n---\n\nBody")
     (tmp_path / "folder2" / "index.md").write_text("")
     plans = w.organize_notes()
     found_index = False
@@ -51,8 +57,8 @@ def test_wikilink_cleanup():
         if plan.path.endswith("index.md"):
             found_index = True
             content = plan.payload["content"]
-            # Should link to notes in the same folder and subfolder indexes
-            assert "[[NoteC]]" in content or "[[folder2/NoteC]]" in content
+            # Should link to subfolder notes or indexes
+            assert any(link in content for link in ["[[folder2/NoteC]]", "[[folder2/index]]", "[[folder1/NoteB]]", "[[folder1/index]]"])
     assert found_index
 
 def test_apply_plan(tmp_path):

@@ -1,10 +1,11 @@
 from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll, Horizontal
-from textual.widgets import Header, Footer, Input, Button, Static
-from textual.reactive import reactive
 from textual.binding import Binding
-from textual.theme import Theme
+from textual.containers import Horizontal, VerticalScroll
 from textual.markup import MarkupError, escape
+from textual.reactive import reactive
+from textual.theme import Theme
+from textual.widgets import Button, Footer, Header, Input, Static
+
 from mnemosyne.agent.loop import run_stream as agent_run_stream
 from mnemosyne.agent.schemas import WritePlan
 from mnemosyne.db.connection import get_history, save_messages
@@ -23,6 +24,7 @@ VAULT_THEME = Theme(
     panel="#201f1d",
     dark=True,
 )
+
 
 class ChatMessage(Static):
     DEFAULT_CSS = """
@@ -44,6 +46,7 @@ class ChatMessage(Static):
     }
     """
 
+
 class WritePlanWidget(Static):
     DEFAULT_CSS = """
     WritePlanWidget {
@@ -52,6 +55,7 @@ class WritePlanWidget(Static):
         margin: 1 0;
     }
     """
+
 
 class ChatApp(App):
     BINDINGS = [
@@ -72,7 +76,9 @@ class ChatApp(App):
         yield Header(show_clock=True)
         yield VerticalScroll(id="conversation")
         with Horizontal(id="input-row"):
-            yield Input(placeholder="Ask anything about your vault...", id="message-input")
+            yield Input(
+                placeholder="Ask anything about your vault...", id="message-input"
+            )
             yield Button("Send", variant="primary", id="send-btn")
         yield Footer()
 
@@ -97,58 +103,70 @@ class ChatApp(App):
         input_widget.disabled = True
         conv = self.query_one("#conversation", VerticalScroll)
         try:
-    conv.mount(ChatMessage(f"**You:** {message}", classes="user"))
-except MarkupError:
-    conv.mount(ChatMessage(escape(f"**You:** {message}"), classes="user"))
+            conv.mount(ChatMessage(f"**You:** {message}", classes="user"))
+        except MarkupError:
+            conv.mount(ChatMessage(escape(f"**You:** {message}"), classes="user"))
         conv.scroll_end(animate=False)
 
-        async def stream_agent():
+        try:
             history = get_history("local")
             content = ""
-            try:
-    msg_widget = ChatMessage("", classes="assistant")
-    conv.mount(msg_widget)
-except MarkupError:
-    msg_widget = ChatMessage(escape(""), classes="assistant")
-    conv.mount(msg_widget)
+            msg_widget = ChatMessage("", classes="assistant")
             conv.mount(msg_widget)
             conv.scroll_end(animate=False)
+
             async def update_content(new_content):
                 try:
-    msg_widget.update(new_content)
-except MarkupError:
-    msg_widget.update(escape(new_content))
+                    msg_widget.update(new_content)
+                except MarkupError:
+                    msg_widget.update(escape(new_content))
                 conv.scroll_end(animate=False)
-            for chunk in agent_run_stream(message, history):
+
+            # Use async for for streaming agent
+            async for chunk in agent_run_stream(message, history):
                 if chunk["type"] == "content":
                     content = chunk["content"]
                     await update_content(content)
                 elif chunk["type"] == "tool_call":
-                    tool_line = "  ".join(f"[🔍 {t.get('function', {}).get('name', '?')}]" for t in chunk["tool_calls"])
+                    tool_line = "  ".join(
+                        f"[🔍 {t.get('function', {}).get('name', '?')}]"
+                        for t in chunk["tool_calls"]
+                    )
                     try:
-    conv.mount(ChatMessage(tool_line, classes="tool-call"))
-except MarkupError:
-    conv.mount(ChatMessage(escape(tool_line), classes="tool-call"))
+                        conv.mount(ChatMessage(tool_line, classes="tool-call"))
+                    except MarkupError:
+                        conv.mount(ChatMessage(escape(tool_line), classes="tool-call"))
                     conv.scroll_end(animate=False)
                 elif chunk["type"] == "done":
                     break
-            # Save message after streaming is done
-            save_messages("local", "tui", [
-                {"role": "user", "content": message},
-                {"role": "assistant", "content": content},
-            ])
+            save_messages(
+                "local",
+                "tui",
+                [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": content},
+                ],
+            )
+        except Exception as e:
+            conv.mount(ChatMessage(f"[red]Error: {e}[/red]", classes="error"))
+        finally:
             input_widget.disabled = False
             input_widget.focus()
-        await stream_agent()
 
     async def action_reindex(self):
-        from mnemosyne.services import vault as v, index as idx, embed as emb
         from mnemosyne.db.connection import init_db
+        from mnemosyne.services import embed as emb
+        from mnemosyne.services import index as idx
+        from mnemosyne.services import vault as v
+
         conv = self.query_one("#conversation", VerticalScroll)
         try:
-    conv.mount(ChatMessage("[dim]Reindexing vault...[/dim]", classes="tool-call"))
-except MarkupError:
-    conv.mount(ChatMessage(escape("Reindexing vault..."), classes="tool-call"))
+            conv.mount(
+                ChatMessage("[dim]Reindexing vault...[/dim]", classes="tool-call")
+            )
+        except MarkupError:
+            conv.mount(ChatMessage(escape("Reindexing vault..."), classes="tool-call"))
+
         def do_reindex():
             init_db()
             notes = v.crawl_vault()
@@ -157,27 +175,34 @@ except MarkupError:
             emb.ensure_collection()
             emb.index_chunks(chunks)
             return len(chunks)
+
         n = await self.run_in_thread(do_reindex)
         try:
-    conv.mount(ChatMessage(f"[green]✓ Reindexed {n} chunks[/green]", classes="assistant"))
-except MarkupError:
-    conv.mount(ChatMessage(escape(f"✓ Reindexed {n} chunks"), classes="assistant"))
+            conv.mount(
+                ChatMessage(f"[green]✓ Reindexed {n} chunks[/green]", classes="assistant")
+            )
+        except MarkupError:
+            conv.mount(ChatMessage(escape(f"✓ Reindexed {n} chunks"), classes="assistant"))
         conv.scroll_end(animate=False)
 
     async def action_clear(self):
         conv = self.query_one("#conversation", VerticalScroll)
         await conv.remove_children()
+        input_widget = self.query_one("#message-input", Input)
+        input_widget.value = ""
+        input_widget.focus()
 
     async def on_key(self, event):
         if event.key == "enter" and self.pending_plans:
             from mnemosyne.services.writes import apply_plan
+
             plan = self.pending_plans
             result = apply_plan(plan)
             conv = self.query_one("#conversation", VerticalScroll)
             try:
-    conv.mount(ChatMessage(f"[green]{result}[/green]", classes="assistant"))
-except MarkupError:
-    conv.mount(ChatMessage(escape(str(result)), classes="assistant"))
+                conv.mount(ChatMessage(f"[green]{result}[/green]", classes="assistant"))
+            except MarkupError:
+                conv.mount(ChatMessage(escape(str(result)), classes="assistant"))
             self.pending_plans = self.pending_plans[1:]
             conv.scroll_end(animate=False)
 
@@ -186,9 +211,16 @@ except MarkupError:
             self.pending_plans = []
             conv = self.query_one("#conversation", VerticalScroll)
             try:
-    conv.mount(ChatMessage("[yellow]Write plan rejected.[/yellow]", classes="tool-call"))
-except MarkupError:
-    conv.mount(ChatMessage(escape("Write plan rejected."), classes="tool-call"))
+                conv.mount(
+                    ChatMessage(
+                        "[yellow]Write plan rejected.[/yellow]", classes="tool-call"
+                    )
+                )
+            except MarkupError:
+                conv.mount(
+                    ChatMessage(escape("Write plan rejected."), classes="tool-call")
+                )
+
 
 def run_tui():
     app = ChatApp()
