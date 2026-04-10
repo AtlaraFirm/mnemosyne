@@ -27,8 +27,13 @@ def crawl_vault() -> list[Note]:
     for md_file in vault.rglob("*.md"):
         if _should_ignore(md_file, vault):
             continue
-        notes.append(read_note(md_file))
+        if md_file.is_file():
+            notes.append(read_note(md_file))
     return notes
+
+def get_note_titles() -> set[str]:
+    """Return a set of all note titles in the vault."""
+    return set(note.title for note in crawl_vault())
 
 def read_note(path: Path) -> Note:
     settings = get_settings()
@@ -63,7 +68,7 @@ def read_note(path: Path) -> Note:
     )
 
 def chunk_note(note: Note) -> list[Chunk]:
-    """Split note body into heading-level chunks."""
+    """Split note body into heading-level chunks, or fallback to MAX_CHUNK_CHARS."""
     heading_pattern = re.compile(r'^(#{1,6}\s+.+)$', re.MULTILINE)
     splits = heading_pattern.split(note.body)
     chunks = []
@@ -80,7 +85,18 @@ def chunk_note(note: Note) -> list[Chunk]:
             chunk_text = f"{heading}\n{content}".strip()
             chunks.append(_make_chunk(note, heading.lstrip('#').strip(), chunk_text, offset))
         offset += len(heading) + len(content)
-    return chunks if chunks else [_make_chunk(note, note.title, note.body, 0)]
+    if chunks:
+        return chunks
+    # Fallback: no headings, split by MAX_CHUNK_CHARS
+    settings = get_settings()
+    max_len = getattr(settings, "max_chunk_chars", 1200)
+    body = note.body.strip()
+    fallback_chunks = []
+    for i in range(0, len(body), max_len):
+        part = body[i:i+max_len]
+        heading = f"{note.title} (part {i//max_len+1})"
+        fallback_chunks.append(_make_chunk(note, heading, part, i))
+    return fallback_chunks if fallback_chunks else [_make_chunk(note, note.title, note.body, 0)]
 
 def _make_chunk(note: Note, heading: str, text: str, offset: int) -> Chunk:
     chunk_id = hashlib.sha256(f"{note.path}::{heading}".encode()).hexdigest()[:16]

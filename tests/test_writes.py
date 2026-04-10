@@ -1,4 +1,3 @@
-import pytest
 from mnemosyne.services import writes
 
 def test_create_note(tmp_path):
@@ -8,7 +7,7 @@ def test_create_note(tmp_path):
     assert "TestBody" in plan.payload["content"]
 
 def test_append_note(tmp_path):
-    plan = writes.create_note("AppendTitle", "Body")
+    writes.create_note("AppendTitle", "Body")
     path = tmp_path / "AppendTitle.md"
     path.write_text("Body")
     plan2 = writes.append_note(str(path), "Appended text")
@@ -16,7 +15,7 @@ def test_append_note(tmp_path):
     assert "Appended text" in plan2.payload["content"]
 
 def test_update_frontmatter(tmp_path):
-    plan = writes.create_note("FMTitle", "Body")
+    writes.create_note("FMTitle", "Body")
     path = tmp_path / "FMTitle.md"
     path.write_text("Body")
     plan2 = writes.update_frontmatter(str(path), {"newkey": "newval"})
@@ -24,6 +23,9 @@ def test_update_frontmatter(tmp_path):
     assert "newkey" in plan2.payload["content"]
 
 def test_apply_plan(tmp_path):
+    import os
+    os.environ["VAULT_PATH"] = str(tmp_path)
+    os.environ["AUDIT_LOG_PATH"] = str(tmp_path/"audit.log")
     plan = writes.create_note("PlanTitle", "Body")
     path = tmp_path / "PlanTitle.md"
     plan2 = writes.append_note(str(path), "Appended text")

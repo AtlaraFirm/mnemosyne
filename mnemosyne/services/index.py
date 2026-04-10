@@ -1,5 +1,4 @@
 import sqlite3
-from pathlib import Path
 from mnemosyne.config import get_settings
 from mnemosyne.agent.schemas import Chunk, SearchResult
 

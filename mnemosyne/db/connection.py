@@ -1,5 +1,4 @@
 import sqlite3
-from pathlib import Path
 from mnemosyne.config import get_settings
 
 def _conn() -> sqlite3.Connection:

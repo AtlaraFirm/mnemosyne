@@ -1,27 +1,185 @@
-import frontmatter
 import difflib
-from pathlib import Path
+import re
+from collections import Counter
 from datetime import datetime
-from mnemosyne.config import get_settings
+from pathlib import Path
+from typing import Optional
+
+import frontmatter
+
 from mnemosyne.agent.schemas import WritePlan
+from mnemosyne.config import get_settings
+
 
 def _vault() -> Path:
     return Path(get_settings().vault_path)
 
-def create_note(title: str, body: str, folder: str = "", tags: list[str] = None) -> WritePlan:
+
+def create_note(
+    title: str, body: str, folder: str = "", tags: list[str] = []
+) -> WritePlan:
     # Input validation
     if not title or not title.strip():
         raise ValueError("Note title cannot be empty.")
     if any(x in title for x in ["..", "/", "\\", ":", "|", "?", "*", "<", ">"]):
         raise ValueError("Invalid characters in note title.")
-    if title.startswith('.'):
+    if title.startswith("."):
         raise ValueError("Note title cannot start with a dot.")
     folder = folder or ""
-    safe_title = title.replace("/", "-").replace("\\", "-").replace("..", "-").replace(";", "-").replace(":", "-").replace("|", "-").replace("?", "-").replace("*", "-").replace("<", "-").replace(">", "-")
+    safe_title = (
+        title.replace("/", "-")
+        .replace("\\", "-")
+        .replace("..", "-")
+        .replace(";", "-")
+        .replace(":", "-")
+        .replace("|", "-")
+        .replace("?", "-")
+        .replace("*", "-")
+        .replace("<", "-")
+        .replace(">", "-")
+    )
     rel_path = f"{folder}/{safe_title}.md".lstrip("/")
     abs_path = _vault() / rel_path
-    fm = {"title": title, "created": datetime.utcnow().isoformat(), "tags": tags or []}
-    post = frontmatter.Post(body, **fm)
+
+    # Tag normalization: lowercase, hyphenated
+    def normalize_tag(tag):
+        return tag.strip().lower().replace(" ", "-").replace("_", "-")
+
+    norm_tags = [normalize_tag(t) for t in (tags or []) if t.strip()]
+
+    # Auto-tagging: extract top keywords from body (simple approach)
+    STOPWORDS = set(
+        [
+            "the",
+            "and",
+            "for",
+            "are",
+            "but",
+            "not",
+            "you",
+            "with",
+            "that",
+            "this",
+            "was",
+            "have",
+            "from",
+            "they",
+            "his",
+            "her",
+            "she",
+            "him",
+            "all",
+            "can",
+            "had",
+            "one",
+            "has",
+            "were",
+            "their",
+            "what",
+            "when",
+            "your",
+            "out",
+            "use",
+            "how",
+            "which",
+            "will",
+            "each",
+            "about",
+            "many",
+            "then",
+            "them",
+            "these",
+            "some",
+            "would",
+            "make",
+            "like",
+            "himself",
+            "herself",
+            "into",
+            "more",
+            "other",
+            "could",
+            "our",
+            "there",
+            "been",
+            "if",
+            "no",
+            "than",
+            "so",
+            "may",
+            "on",
+            "in",
+            "to",
+            "of",
+            "a",
+            "an",
+            "is",
+            "it",
+            "as",
+            "at",
+            "by",
+            "be",
+            "or",
+            "we",
+            "do",
+            "did",
+            "does",
+            "up",
+            "down",
+            "over",
+            "under",
+            "again",
+            "very",
+            "just",
+            "any",
+            "now",
+            "who",
+            "where",
+            "why",
+            "because",
+            "while",
+            "between",
+            "both",
+            "few",
+            "most",
+            "such",
+            "own",
+            "same",
+            "too",
+            "s",
+            "t",
+            "can",
+            "will",
+            "don",
+            "should",
+            "ll",
+            "d",
+            "re",
+            "ve",
+            "m",
+        ]
+    )
+    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b", body.lower())
+    keywords = [w for w in words if w not in STOPWORDS]
+    freq = Counter(keywords)
+    auto_tags = [normalize_tag(w) for w, _ in freq.most_common(5) if w not in norm_tags]
+    all_tags = norm_tags + auto_tags
+
+    # Auto-linking: add wikilinks for other note titles
+    from mnemosyne.services.vault import get_note_titles
+
+    note_titles = get_note_titles()
+
+    def add_wikilinks(text):
+        for t in sorted(note_titles, key=len, reverse=True):
+            if t != title and t in text and f"[[{t}]]" not in text:
+                text = re.sub(rf"(?<!\[\[)\b{re.escape(t)}\b(?!\]\])", f"[[{t}]]", text)
+        return text
+
+    body_linked = add_wikilinks(body)
+
+    fm = {"title": title, "created": datetime.utcnow().isoformat(), "tags": all_tags}
+    post = frontmatter.Post(body_linked, **fm)
     preview = f"CREATE {rel_path}\n\n{frontmatter.dumps(post)}"
     return WritePlan(
         operation="create_note",
@@ -30,14 +188,20 @@ def create_note(title: str, body: str, folder: str = "", tags: list[str] = None)
         payload={"abs_path": str(abs_path), "content": frontmatter.dumps(post)},
     )
 
-def append_note(path: str, text: str, section: str = None) -> WritePlan:
+
+def append_note(path: str, text: str, section: Optional[str] = None) -> WritePlan:
     abs_path = _vault() / path
     original = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
     new_content = original.rstrip() + f"\n\n{text}\n"
-    diff = "\n".join(difflib.unified_diff(
-        original.splitlines(), new_content.splitlines(),
-        fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
-    ))
+    diff = "\n".join(
+        difflib.unified_diff(
+            original.splitlines(),
+            new_content.splitlines(),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            lineterm="",
+        )
+    )
     return WritePlan(
         operation="append_note",
         path=path,
@@ -45,22 +209,104 @@ def append_note(path: str, text: str, section: str = None) -> WritePlan:
         payload={"abs_path": str(abs_path), "content": new_content},
     )
 
+
 def update_frontmatter(path: str, updates: dict) -> WritePlan:
     abs_path = _vault() / path
     post = frontmatter.load(str(abs_path))
     original = frontmatter.dumps(post)
     post.metadata.update(updates)
     new_content = frontmatter.dumps(post)
-    diff = "\n".join(difflib.unified_diff(
-        original.splitlines(), new_content.splitlines(),
-        fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
-    ))
+    diff = "\n".join(
+        difflib.unified_diff(
+            original.splitlines(),
+            new_content.splitlines(),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            lineterm="",
+        )
+    )
     return WritePlan(
         operation="update_frontmatter",
         path=path,
         preview=diff,
         payload={"abs_path": str(abs_path), "content": new_content},
     )
+
+
+def organize_notes() -> list[WritePlan]:
+    """Scan all notes and propose WritePlans for tagging, linking, cleanup, and index note creation."""
+    from mnemosyne.services.vault import crawl_vault, get_note_titles
+
+    notes = crawl_vault()
+    note_titles = get_note_titles()
+    plans = []
+    # Organize individual notes
+    for note in notes:
+        tags = [
+            t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags
+        ]
+        body = note.body
+        for t in sorted(note_titles, key=len, reverse=True):
+            if t != note.title and t in body and f"[[{t}]]" not in body:
+                body = re.sub(rf"(?<!\[\[)\b{re.escape(t)}\b(?!\]\])", f"[[{t}]]", body)
+        tags = sorted(set(tags))
+        changed = tags != note.tags or body != note.body
+        if changed:
+            fm_updates = {"tags": tags}
+            plans.append(update_frontmatter(note.path, fm_updates))
+            post = frontmatter.Post(body, **{**note.frontmatter, "tags": tags})
+            preview = f"CLEANUP {note.path}\n\n{frontmatter.dumps(post)}"
+            plans.append(
+                WritePlan(
+                    operation="append_note",
+                    path=note.path,
+                    preview=preview,
+                    payload={
+                        "abs_path": str(_vault() / note.path),
+                        "content": frontmatter.dumps(post),
+                    },
+                )
+            )
+    # Create/update index note in every directory, linking only to subdirectory indexes
+    import os
+    from pathlib import Path
+
+    vault_root = _vault()
+    for dirpath, dirnames, filenames in os.walk(vault_root):
+        dirpath = Path(dirpath)
+        subdirs = [d for d in dirnames if not d.startswith(".")]
+        notes = [
+            f
+            for f in filenames
+            if f.endswith(".md") and f != "index.md" and not f.startswith(".")
+        ]
+        if not notes and not subdirs:
+            continue
+        lines = []
+        for note in sorted(notes):
+            lines.append(f"- [[{note[:-3]}]]")
+        for subdir in sorted(subdirs):
+            lines.append(f"- [[{subdir}/index]]")
+        index_body = "# Index\n\n" + "\n".join(lines)
+        index_tags = ["index"]
+        index_path = dirpath / "index.md"
+        post = frontmatter.Post(index_body, **{"title": "Index", "tags": index_tags})
+        preview = (
+            f"UPDATE {index_path.relative_to(vault_root)}\n\n{frontmatter.dumps(post)}"
+        )
+        plans.append(
+            WritePlan(
+                operation="append_note",
+                path=str(index_path.relative_to(vault_root)),
+                preview=preview,
+                payload={
+                    "abs_path": str(index_path),
+                    "content": frontmatter.dumps(post),
+                },
+            )
+        )
+    return plans
+
 
 def apply_plan(plan: WritePlan) -> str:
     settings = get_settings()
@@ -72,6 +318,28 @@ def apply_plan(plan: WritePlan) -> str:
     else:
         abs_path.write_text(content, encoding="utf-8")
     # Audit log
-    with open(settings.audit_log_path, "a") as f:
+    # Restrict audit log path to vault directory for safety
+    vault_dir = Path(settings.vault_path).expanduser().resolve(strict=False)
+    try:
+        audit_log_path = Path(settings.audit_log_path)
+        if not audit_log_path.is_absolute():
+            audit_log_path = (vault_dir / audit_log_path).resolve(strict=False)
+        else:
+            audit_log_path = audit_log_path.expanduser().resolve(strict=False)
+        # DEBUG: Write to file for subprocess visibility
+        with open('/tmp/mnemosyne_audit_debug.log', 'a') as dbg:
+            dbg.write(f"vault_dir={vault_dir}\naudit_log_path={audit_log_path}\n")
+        audit_log_path.relative_to(vault_dir)
+    except Exception:
+        raise ValueError("audit_log_path must be inside the vault directory")
+
+    # Ensure audit_log_path is inside vault_dir (or is vault_dir itself)
+    try:
+        audit_log_path.relative_to(vault_dir)
+    except ValueError:
+        raise ValueError("audit_log_path must be inside the vault directory")
+
+    audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(audit_log_path, "a") as f:
         f.write(f"{datetime.utcnow().isoformat()}|{plan.operation}|{plan.path}\n")
     return f"✓ Applied: {plan.operation} → {plan.path}"

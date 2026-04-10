@@ -1,8 +1,14 @@
-# Mnemosyne Documentation
+---
+tags:
+- index
+title: Index
+---
 
-Welcome to the Mnemosyne documentation site!
+# Index
 
-- [Project README](./README.md)
-- [GitHub Repository](https://github.com/your-org-or-user/mnemosyne)
-
-See the README for features, usage, and getting started instructions.
+- [README](README.md)
+- [CLI Guide](cli.md)
+- [TUI Guide](tui.md)
+- [Telegram Bot Guide](telegram.md)
+- [FAQ & Troubleshooting](faq.md)
+- [Developer Guide](development.md)

@@ -1,6 +1,4 @@
-import pytest
 from mnemosyne.services import vault
-from pathlib import Path
 
 def test_should_ignore(tmp_path, monkeypatch):
     vault_root = tmp_path

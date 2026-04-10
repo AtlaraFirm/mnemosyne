@@ -1,7 +1,6 @@
 import subprocess
 import sys
 import pytest
-from pathlib import Path
 
 CLI = [sys.executable, '-m', 'mnemosyne.frontends.cli']
 
@@ -16,6 +15,9 @@ def test_search(vault):
     # Index notes before searching
     subprocess.run(CLI + ['reindex', '--vault', str(vault)], check=True)
     result = subprocess.run(CLI + ['search', 'Hello', '--vault', str(vault)], capture_output=True, text=True)
+    # Check for table header and note title in output
+    assert 'Score' in result.stdout
+    assert 'Note' in result.stdout
     assert 'Note 1' in result.stdout
 
 def test_new_note(vault):

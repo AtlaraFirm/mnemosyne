@@ -1,0 +1,2 @@
+[console_scripts]
+mnemosyne = mnemosyne.frontends.cli:app

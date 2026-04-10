@@ -1,16 +1,19 @@
 import ollama
-import json
 from mnemosyne.config import get_settings
 from mnemosyne.agent.tools import TOOLS, dispatch
 from mnemosyne.agent.schemas import AgentResponse, WritePlan
 
 SYSTEM_PROMPT = """You are a helpful assistant for an Obsidian markdown vault.\nYou have tools to search notes, read note contents, find related notes,\nand propose write actions for the user to approve.\n\nRules:\n- Always search before answering questions about note contents.\n- For write operations, use propose_* tools. Never claim to have written something without proposing first.\n- Cite specific note paths when referencing content.\n- If you cannot find relevant notes, say so clearly rather than guessing.\n- Keep responses focused and direct."""
 
+
 def run(message: str, history: list[dict]) -> AgentResponse:
+    """Synchronous agent loop (non-streaming)."""
     settings = get_settings()
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [
-        {"role": "user", "content": message}
-    ]
+    messages = (
+        [{"role": "system", "content": SYSTEM_PROMPT}]
+        + history
+        + [{"role": "user", "content": message}]
+    )
     tool_calls_made = []
     write_plans = []
     max_iters = settings.agent_max_iterations
@@ -32,9 +35,11 @@ def run(message: str, history: list[dict]) -> AgentResponse:
                         write_plans.append(plan)
                     except Exception:
                         pass
+            # Convert all messages to dicts for Pydantic compatibility
+            msg_dicts = [m if isinstance(m, dict) else m.__dict__ for m in messages]
             return AgentResponse(
                 text=response.message.content or "",
-                messages=messages,
+                messages=msg_dicts,
                 write_plans=write_plans,
                 tool_calls_made=tool_calls_made,
             )
@@ -44,17 +49,113 @@ def run(message: str, history: list[dict]) -> AgentResponse:
             args = tc.function.arguments
             tool_calls_made.append(name)
             result = dispatch(name, args)
-            messages.append({
-                "role": "tool",
-                "tool_name": name,
-                "content": str(result),
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_name": name,
+                    "content": str(result),
+                }
+            )
 
     # Loop cap hit — force a final response
-    messages.append({"role": "user", "content": "Please summarize what you found so far."})
+    messages.append(
+        {"role": "user", "content": "Please summarize what you found so far."}
+    )
     final = ollama.chat(model=settings.chat_model, messages=messages)
     return AgentResponse(
-        text=final.message.content or "Reached iteration limit. Please refine your query.",
+        text=final.message.content
+        or "Reached iteration limit. Please refine your query.",
+        messages=messages,
+        write_plans=write_plans,
+        tool_calls_made=tool_calls_made,
+    )
+
+
+def run_stream(message: str, history: list[dict]):
+    """Streaming agent loop: yields partial content as it arrives from Ollama."""
+    settings = get_settings()
+    messages = (
+        [{"role": "system", "content": SYSTEM_PROMPT}]
+        + history
+        + [{"role": "user", "content": message}]
+    )
+    tool_calls_made = []
+    write_plans = []
+    max_iters = settings.agent_max_iterations
+    partial_content = ""
+
+    for chunk in ollama.chat(
+        model=settings.chat_model,
+        messages=messages,
+        tools=TOOLS,
+        stream=True,
+    ):
+        # chunk: {"content": ..., "role": ..., ...}
+        if chunk.get("content"):
+            partial_content += chunk["content"]
+            yield {"type": "content", "content": partial_content}
+        if chunk.get("tool_calls"):
+            # Optionally yield tool call info if needed
+            yield {"type": "tool_call", "tool_calls": chunk["tool_calls"]}
+    # Finalize (simulate AgentResponse for compatibility)
+    yield {"type": "done", "content": partial_content}
+    settings = get_settings()
+    messages = (
+        [{"role": "system", "content": SYSTEM_PROMPT}]
+        + history
+        + [{"role": "user", "content": message}]
+    )
+    tool_calls_made = []
+    write_plans = []
+    max_iters = settings.agent_max_iterations
+
+    for iteration in range(max_iters):
+        response = ollama.chat(
+            model=settings.chat_model,
+            messages=messages,
+            tools=TOOLS,
+        )
+        messages.append(response.message)
+
+        if not response.message.tool_calls:
+            # Extract any WritePlan objects from tool results in this turn
+            for msg in messages:
+                if msg.get("role") == "tool":
+                    try:
+                        plan = WritePlan.model_validate_json(msg["content"])
+                        write_plans.append(plan)
+                    except Exception:
+                        pass
+            # Convert all messages to dicts for Pydantic compatibility
+            msg_dicts = [m if isinstance(m, dict) else m.__dict__ for m in messages]
+            return AgentResponse(
+                text=response.message.content or "",
+                messages=msg_dicts,
+                write_plans=write_plans,
+                tool_calls_made=tool_calls_made,
+            )
+
+        for tc in response.message.tool_calls:
+            name = tc.function.name
+            args = tc.function.arguments
+            tool_calls_made.append(name)
+            result = dispatch(name, args)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_name": name,
+                    "content": str(result),
+                }
+            )
+
+    # Loop cap hit — force a final response
+    messages.append(
+        {"role": "user", "content": "Please summarize what you found so far."}
+    )
+    final = ollama.chat(model=settings.chat_model, messages=messages)
+    return AgentResponse(
+        text=final.message.content
+        or "Reached iteration limit. Please refine your query.",
         messages=messages,
         write_plans=write_plans,
         tool_calls_made=tool_calls_made,

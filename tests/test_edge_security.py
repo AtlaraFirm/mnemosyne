@@ -2,12 +2,15 @@ import subprocess
 import sys
 from pathlib import Path
 import tempfile
-import pytest
 
 CLI = [sys.executable, '-m', 'mnemosyne.frontends.cli']
 
-def run_cli(args, cwd=None, input=None):
-    return subprocess.run(CLI + args, capture_output=True, text=True, cwd=cwd, input=input)
+def run_cli(args, cwd=None, input=None, env=None):
+    import os
+    env_vars = os.environ.copy()
+    if env:
+        env_vars.update(env)
+    return subprocess.run(CLI + args, capture_output=True, text=True, cwd=cwd, input=input, env=env_vars)
 
 def test_empty_note_title():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -30,7 +33,8 @@ def test_large_note():
         vault = Path(tmpdir) / "vault"
         vault.mkdir()
         large_body = 'A' * 10**6
-        result = run_cli(['new', 'BigNote', '--vault', str(vault), '--yes', '--content', large_body])
+        env = {"VAULT_PATH": str(vault), "AUDIT_LOG_PATH": str(vault/"audit.log")}
+        result = run_cli(['new', 'BigNote', '--vault', str(vault), '--yes', '--content', large_body], env=env)
         assert result.returncode == 0
         note_path = vault / 'BigNote.md'
         assert note_path.exists()
@@ -42,7 +46,8 @@ def test_unicode_title_and_body():
         vault.mkdir()
         title = '测试🧪'
         body = '内容 with emoji 🚀'
-        result = run_cli(['new', title, '--vault', str(vault), '--yes', '--content', body])
+        env = {"VAULT_PATH": str(vault), "AUDIT_LOG_PATH": str(vault/"audit.log")}
+        result = run_cli(['new', title, '--vault', str(vault), '--yes', '--content', body], env=env)
         assert result.returncode == 0
         note_path = vault / f'{title}.md'
         assert note_path.exists()
