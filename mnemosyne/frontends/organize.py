@@ -19,7 +19,7 @@ def organize(
         console.print("[green]No changes needed. Vault is already organized.")
         raise typer.Exit()
     for plan in plans:
-        console.print(plan.preview)
+        console.print(plan.preview, markup=False)
         if yes or typer.confirm(f"Apply {plan.operation} to {plan.path}?"):
             console.print(writes.apply_plan(plan))
 

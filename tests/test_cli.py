@@ -4,11 +4,16 @@ import pytest
 
 CLI = [sys.executable, '-m', 'mnemosyne.frontends.cli']
 
+import os
+
 @pytest.fixture(scope='module')
 def vault(tmp_path_factory):
     vault = tmp_path_factory.mktemp('vault')
     (vault / 'note1.md').write_text('# Note 1\nHello world.')
     (vault / 'note2.md').write_text('# Note 2\nAnother note.')
+    # Patch: set DB_PATH to a temp file inside the vault for test isolation
+    db_path = vault / 'test.db'
+    os.environ['DB_PATH'] = str(db_path)
     return vault
 
 def test_search(vault):

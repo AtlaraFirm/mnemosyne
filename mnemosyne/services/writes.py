@@ -15,6 +15,10 @@ def _vault() -> Path:
     return Path(get_settings().vault_path)
 
 
+def _strip_empty_wikilinks(text: str) -> str:
+    # Replace [[   ]] or [[\t]] or [[ ]] (empty/whitespace-only wikilinks) with a single space
+    return re.sub(r"\[\[\s*\]\]", " ", text)
+
 def create_note(
     title: str, body: str, folder: str = "", tags: list[str] = []
 ) -> WritePlan:
@@ -170,13 +174,21 @@ def create_note(
 
     note_titles = get_note_titles()
 
+    IGNORE_LINK_TITLES = {'', ' '}
     def add_wikilinks(text):
         for t in sorted(note_titles, key=len, reverse=True):
+            if not t or not t.strip() or t in IGNORE_LINK_TITLES:
+                continue
             if t != title and t in text and f"[[{t}]]" not in text:
                 text = re.sub(rf"(?<!\[\[)\b{re.escape(t)}\b(?!\]\])", f"[[{t}]]", text)
         return text
 
-    body_linked = add_wikilinks(body)
+    # Strip empty/whitespace-only wikilinks before/after auto-linking
+    body_cleaned = _strip_empty_wikilinks(body)
+    body_linked = add_wikilinks(body_cleaned)
+
+    # Final cleanup in case auto-linking introduced any empty wikilinks
+    body_linked = _strip_empty_wikilinks(body_linked)
 
     fm = {"title": title, "created": datetime.utcnow().isoformat(), "tags": all_tags}
     post = frontmatter.Post(body_linked, **fm)
@@ -215,6 +227,9 @@ def update_frontmatter(path: str, updates: dict) -> WritePlan:
     post = frontmatter.load(str(abs_path))
     original = frontmatter.dumps(post)
     post.metadata.update(updates)
+    # Also strip empty wikilinks from body if present
+    if isinstance(post.content, str):
+        post.content = _strip_empty_wikilinks(post.content)
     new_content = frontmatter.dumps(post)
     diff = "\n".join(
         difflib.unified_diff(
@@ -234,21 +249,29 @@ def update_frontmatter(path: str, updates: dict) -> WritePlan:
 
 
 def organize_notes() -> list[WritePlan]:
-    """Scan all notes and propose WritePlans for tagging, linking, cleanup, and index note creation."""
+    """Scan all notes and propose WritePlans for tagging, linking, cleanup, and index note creation.
+    Also scan for broken wikilinks and collect them for later fixing."""
     from mnemosyne.services.vault import crawl_vault, get_note_titles
 
     notes = crawl_vault()
     note_titles = get_note_titles()
+    note_paths = set(str(note.path)[:-3] if str(note.path).endswith('.md') else str(note.path) for note in notes)
     plans = []
+    broken_links_report = []
     # Organize individual notes
     for note in notes:
         tags = [
             t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags
         ]
         body = note.body
+        IGNORE_LINK_TITLES = {'', ' '}
         for t in sorted(note_titles, key=len, reverse=True):
+            if not t or not t.strip() or t in IGNORE_LINK_TITLES:
+                continue
             if t != note.title and t in body and f"[[{t}]]" not in body:
                 body = re.sub(rf"(?<!\[\[)\b{re.escape(t)}\b(?!\]\])", f"[[{t}]]", body)
+        # Strip empty/whitespace-only wikilinks from body
+        body = _strip_empty_wikilinks(body)
         tags = sorted(set(tags))
         changed = tags != note.tags or body != note.body
         if changed:
@@ -267,6 +290,19 @@ def organize_notes() -> list[WritePlan]:
                     },
                 )
             )
+        # --- Broken wikilink detection ---
+        for wikilink in getattr(note, 'wikilinks', []):
+            # Check if wikilink matches a note title or a note path (without .md)
+            if wikilink not in note_titles and wikilink not in note_paths:
+                broken_links_report.append({
+                    'source': str(note.path),
+                    'wikilink': wikilink
+                })
+    # Optionally, write broken links to a file or log for later fixing
+    if broken_links_report:
+        import json
+        report_path = _vault() / "broken_wikilinks_report.json"
+        report_path.write_text(json.dumps(broken_links_report, indent=2), encoding="utf-8")
     # Create/update index note in every directory, linking only to subdirectory indexes
     import os
     from pathlib import Path
@@ -284,9 +320,14 @@ def organize_notes() -> list[WritePlan]:
             continue
         lines = []
         for note in sorted(notes):
-            lines.append(f"- [[{note[:-3]}]]")
+            # Use full relative path from vault root for note links
+            rel_note_path = (dirpath / note).relative_to(vault_root)
+            rel_note_path_str = str(rel_note_path)[:-3]  # remove .md
+            lines.append(f"- [[{rel_note_path_str}]]")
         for subdir in sorted(subdirs):
-            lines.append(f"- [[{subdir}/index]]")
+            # Use full relative path for subdir index links
+            rel_subdir_index = (dirpath / subdir / "index").relative_to(vault_root)
+            lines.append(f"- [[{rel_subdir_index}]]")
         index_body = "# Index\n\n" + "\n".join(lines)
         index_tags = ["index"]
         index_path = dirpath / "index.md"
