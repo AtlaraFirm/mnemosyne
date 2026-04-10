@@ -1,10 +1,11 @@
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll, Horizontal
-from textual.widgets import Header, Footer, Input, Button, Markdown, Label, Static
+from textual.widgets import Header, Footer, Input, Button, Static
 from textual.reactive import reactive
 from textual.binding import Binding
 from textual.theme import Theme
-from mnemosyne.agent.loop import run as agent_run
+from textual.markup import MarkupError, escape
+from mnemosyne.agent.loop import run_stream as agent_run_stream
 from mnemosyne.agent.schemas import WritePlan
 from mnemosyne.db.connection import get_history, save_messages
 
@@ -95,44 +96,59 @@ class ChatApp(App):
         input_widget.value = ""
         input_widget.disabled = True
         conv = self.query_one("#conversation", VerticalScroll)
-        conv.mount(ChatMessage(f"**You:** {message}", classes="user"))
+        try:
+    conv.mount(ChatMessage(f"**You:** {message}", classes="user"))
+except MarkupError:
+    conv.mount(ChatMessage(escape(f"**You:** {message}"), classes="user"))
         conv.scroll_end(animate=False)
 
-        def do_agent():
+        async def stream_agent():
             history = get_history("local")
-            return agent_run(message, history)
-
-        response = await self.run_in_thread(do_agent)
-        save_messages("local", "tui", [
-            {"role": "user", "content": message},
-            {"role": "assistant", "content": response.text},
-        ])
-
-        if response.tool_calls_made:
-            tool_line = "  ".join(f"[🔍 {t}]" for t in response.tool_calls_made)
-            conv.mount(ChatMessage(tool_line, classes="tool-call"))
-
-        conv.mount(ChatMessage(response.text, classes="assistant"))
-
-        if response.write_plans:
-            self.pending_plans = response.write_plans
-            for plan in response.write_plans:
-                widget = WritePlanWidget(
-                    f"**Proposed: {plan.operation}** → `{plan.path}`\n\n"
-                    f"```diff\n{plan.preview[:500]}\n```\n\n"
-                    f"[Enter] to apply · [Escape] to reject"
-                )
-                conv.mount(widget)
-
-        conv.scroll_end(animate=False)
-        input_widget.disabled = False
-        input_widget.focus()
+            content = ""
+            try:
+    msg_widget = ChatMessage("", classes="assistant")
+    conv.mount(msg_widget)
+except MarkupError:
+    msg_widget = ChatMessage(escape(""), classes="assistant")
+    conv.mount(msg_widget)
+            conv.mount(msg_widget)
+            conv.scroll_end(animate=False)
+            async def update_content(new_content):
+                try:
+    msg_widget.update(new_content)
+except MarkupError:
+    msg_widget.update(escape(new_content))
+                conv.scroll_end(animate=False)
+            for chunk in agent_run_stream(message, history):
+                if chunk["type"] == "content":
+                    content = chunk["content"]
+                    await update_content(content)
+                elif chunk["type"] == "tool_call":
+                    tool_line = "  ".join(f"[🔍 {t.get('function', {}).get('name', '?')}]" for t in chunk["tool_calls"])
+                    try:
+    conv.mount(ChatMessage(tool_line, classes="tool-call"))
+except MarkupError:
+    conv.mount(ChatMessage(escape(tool_line), classes="tool-call"))
+                    conv.scroll_end(animate=False)
+                elif chunk["type"] == "done":
+                    break
+            # Save message after streaming is done
+            save_messages("local", "tui", [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": content},
+            ])
+            input_widget.disabled = False
+            input_widget.focus()
+        await stream_agent()
 
     async def action_reindex(self):
         from mnemosyne.services import vault as v, index as idx, embed as emb
         from mnemosyne.db.connection import init_db
         conv = self.query_one("#conversation", VerticalScroll)
-        conv.mount(ChatMessage("[dim]Reindexing vault...[/dim]", classes="tool-call"))
+        try:
+    conv.mount(ChatMessage("[dim]Reindexing vault...[/dim]", classes="tool-call"))
+except MarkupError:
+    conv.mount(ChatMessage(escape("Reindexing vault..."), classes="tool-call"))
         def do_reindex():
             init_db()
             notes = v.crawl_vault()
@@ -142,7 +158,10 @@ class ChatApp(App):
             emb.index_chunks(chunks)
             return len(chunks)
         n = await self.run_in_thread(do_reindex)
-        conv.mount(ChatMessage(f"[green]✓ Reindexed {n} chunks[/green]", classes="assistant"))
+        try:
+    conv.mount(ChatMessage(f"[green]✓ Reindexed {n} chunks[/green]", classes="assistant"))
+except MarkupError:
+    conv.mount(ChatMessage(escape(f"✓ Reindexed {n} chunks"), classes="assistant"))
         conv.scroll_end(animate=False)
 
     async def action_clear(self):
@@ -155,7 +174,10 @@ class ChatApp(App):
             plan = self.pending_plans
             result = apply_plan(plan)
             conv = self.query_one("#conversation", VerticalScroll)
-            conv.mount(ChatMessage(f"[green]{result}[/green]", classes="assistant"))
+            try:
+    conv.mount(ChatMessage(f"[green]{result}[/green]", classes="assistant"))
+except MarkupError:
+    conv.mount(ChatMessage(escape(str(result)), classes="assistant"))
             self.pending_plans = self.pending_plans[1:]
             conv.scroll_end(animate=False)
 
@@ -163,7 +185,10 @@ class ChatApp(App):
         if self.pending_plans:
             self.pending_plans = []
             conv = self.query_one("#conversation", VerticalScroll)
-            conv.mount(ChatMessage("[yellow]Write plan rejected.[/yellow]", classes="tool-call"))
+            try:
+    conv.mount(ChatMessage("[yellow]Write plan rejected.[/yellow]", classes="tool-call"))
+except MarkupError:
+    conv.mount(ChatMessage(escape("Write plan rejected."), classes="tool-call"))
 
 def run_tui():
     app = ChatApp()
