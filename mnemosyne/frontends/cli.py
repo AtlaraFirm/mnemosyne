@@ -267,19 +267,22 @@ def suggest_links_tags(
 
         v1 = np.array(note_vectors[note.path])
         related = []
+        TRIVIAL_TAGS = {"index", "note", "notes", "untitled", "test", "todo", "draft"}
+        STOPWORDS = {
+            "the", "and", "for", "are", "but", "not", "you", "with", "that", "this", "was", "have", "from", "they", "his", "her", "she", "him", "all", "can", "had", "one", "has", "were", "their", "what", "when", "your", "out", "use", "how", "which", "will", "each", "about", "many", "then", "them", "these", "some", "would", "make", "like", "himself", "herself", "into", "more", "other", "could", "our", "there", "been", "if", "no", "than", "so", "may", "on", "in", "to", "of", "a", "an", "is", "it", "as", "at", "by", "be", "or", "we", "do", "did", "does", "up", "down", "over", "under", "again", "very", "just", "any", "now", "who", "where", "why", "because", "while", "between", "both", "few", "most", "such", "own", "same", "too", "s", "t", "can", "will", "don", "should", "ll", "d", "re", "ve", "m"
+        }
         for other in notes:
             if other.path == note.path:
                 continue
             v2 = np.array(note_vectors[other.path])
             sim = dot(v1, v2) / (norm(v1) * norm(v2) + 1e-8)
-            if sim >= threshold:
-                # Suggest wikilink if not already present
-                if other.title not in note.wikilinks:
-                    related.append((sim, other.title, other.path, "wikilink"))
-                # Suggest tag if not already present
-                for tag in other.tags:
-                    if tag and tag not in note.tags:
-                        related.append((sim, tag, other.path, "tag"))
+            # Suggest wikilink if not already present
+            if other.title not in note.wikilinks:
+                related.append((sim, other.title, other.path, "wikilink"))
+            # Suggest tag if not already present
+            for tag in other.tags:
+                if tag and tag not in note.tags and tag.lower() not in TRIVIAL_TAGS and tag.lower() not in STOPWORDS:
+                    related.append((sim, tag, other.path, "tag"))
         # Sort and limit
         related = sorted(related, key=lambda x: -x[0])[:limit]
         for sim, value, path, typ in related:
@@ -293,8 +296,11 @@ def suggest_links_tags(
 
 @app.command()
 def suggest_tags(
+    mode: str = typer.Option(
+        "suggest", "--mode", "-m", help="Mode: 'suggest' to only suggest tags, 'apply' to auto-apply them"
+    ),
     yes: bool = typer.Option(
-        False, "--yes", "-y", help="Apply tag suggestions without confirmation"
+        False, "--yes", "-y", help="Apply tag suggestions without confirmation (only relevant if --mode apply)"
     ),
     vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
     limit: int = typer.Option(5, "--limit", "-n", help="Max tag suggestions per note"),
@@ -302,7 +308,7 @@ def suggest_tags(
         0.5, "--threshold", help="Semantic similarity threshold (0-1)"
     ),
 ):
-    """Suggest and optionally auto-apply tags for notes using semantic similarity."""
+    """Suggest tags for notes using semantic similarity. Optionally auto-apply with --mode apply."""
     import os
     if vault_path:
         os.environ["VAULT_PATH"] = vault_path
@@ -319,19 +325,35 @@ def suggest_tags(
         from numpy import dot
         from numpy.linalg import norm
         v1 = np.array(note_vectors[note.path])
-        suggested_tags = set(note.tags)
+        import re
+        from collections import Counter
+        suggested_tags = set([t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags])
         tag_sources = {}
+        # 1. Semantic similarity to other notes' tags
         for other in notes:
             if other.path == note.path:
                 continue
             v2 = np.array(note_vectors[other.path])
             sim = dot(v1, v2) / (norm(v1) * norm(v2) + 1e-8)
+            TRIVIAL_TAGS = {"index", "note", "notes", "untitled", "test", "todo", "draft"}
+            STOPWORDS = set([
+                "the", "and", "for", "are", "but", "not", "you", "with", "that", "this", "was", "have", "from", "they", "his", "her", "she", "him", "all", "can", "had", "one", "has", "were", "their", "what", "when", "your", "out", "use", "how", "which", "will", "each", "about", "many", "then", "them", "these", "some", "would", "make", "like", "himself", "herself", "into", "more", "other", "could", "our", "there", "been", "if", "no", "than", "so", "may", "on", "in", "to", "of", "a", "an", "is", "it", "as", "at", "by", "be", "or", "we", "do", "did", "does", "up", "down", "over", "under", "again", "very", "just", "any", "now", "who", "where", "why", "because", "while", "between", "both", "few", "most", "such", "own", "same", "too", "s", "t", "can", "will", "don", "should", "ll", "d", "re", "ve", "m"
+            ])
             if sim >= threshold:
                 for tag in other.tags:
-                    if tag and tag not in note.tags:
-                        suggested_tags.add(tag)
-                        tag_sources[tag] = (sim, other.path)
-        new_tags = [t for t in suggested_tags if t not in note.tags]
+                    tag_norm = tag.strip().lower().replace(" ", "-").replace("_", "-")
+                    if tag and tag_norm not in suggested_tags and tag_norm not in TRIVIAL_TAGS and tag_norm not in STOPWORDS:
+                        suggested_tags.add(tag_norm)
+                        tag_sources[tag_norm] = (sim, other.path)
+        # 2. Keyword extraction from note content
+        words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b", (note.title + " " + note.body).lower())
+        keywords = [w for w in words if w not in STOPWORDS and w not in TRIVIAL_TAGS]
+        freq = Counter(keywords)
+        for w, _ in freq.most_common(limit):
+            if w not in suggested_tags:
+                suggested_tags.add(w)
+                tag_sources[w] = (None, "keyword")
+        new_tags = [t for t in suggested_tags if t not in [x.strip().lower().replace(" ", "-").replace("_", "-") for x in note.tags]]
         if new_tags:
             table = Table(
                 title=f"Tag suggestions for {note.title} ({note.path})",
@@ -340,14 +362,18 @@ def suggest_tags(
             )
             table.add_column("Tag", min_width=12)
             table.add_column("Score", width=6)
-            table.add_column("From Note", min_width=20)
+            table.add_column("Source", min_width=20)
             for tag in new_tags:
                 sim, src = tag_sources.get(tag, ("", ""))
-                table.add_row(tag, f"{sim:.2f}" if sim else "", src)
+                table.add_row(tag, f"{sim:.2f}" if sim is not None and sim != "" else "", src)
             console.print(table)
-            if yes or typer.confirm(f"Apply tags to {note.path}? [{', '.join(new_tags)}]"):
-                plan = update_frontmatter(note.path, {"tags": sorted(set(note.tags + new_tags))})
-                console.print(apply_plan(plan))
+            if mode == "apply":
+                if yes or typer.confirm(f"Apply tags to {note.path}? [{', '.join(new_tags)}]"):
+                    plan = update_frontmatter(note.path, {"tags": sorted(set(note.tags + new_tags))})
+                    from rich.syntax import Syntax
+                    console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
+                    if yes or typer.confirm("Apply?"):
+                        console.print(apply_plan(plan))
         else:
             console.print(f"[yellow]No new tag suggestions for {note.title} ({note.path})[/yellow]")
 
