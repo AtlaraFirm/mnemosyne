@@ -42,7 +42,9 @@ def read_note(path: Path) -> Note:
     body = post.content
     fm = dict(post.metadata)
     tags = fm.get("tags", [])
-    if isinstance(tags, str):
+    if tags is None or tags == "":
+        tags = []
+    elif isinstance(tags, str):
         tags = [tags]
     wikilinks = re.findall(r'\[\[([^\]|#]+)', body)
     headings = re.findall(r'^#{1,6}\s+(.+)$', body, re.MULTILINE)
