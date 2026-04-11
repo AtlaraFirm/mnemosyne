@@ -231,29 +231,40 @@ def bot():
 def suggest_links_tags(
     vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
     limit: int = typer.Option(5, "--limit", "-n", help="Max suggestions per note"),
-    threshold: float = typer.Option(0.5, "--threshold", help="Semantic similarity threshold (0-1)"),
+    threshold: float = typer.Option(
+        0.5, "--threshold", help="Semantic similarity threshold (0-1)"
+    ),
 ):
     """Suggest new wikilinks and tags for notes using semantic similarity (no direct modification)."""
     import os
+
     if vault_path:
         os.environ["VAULT_PATH"] = vault_path
-    from mnemosyne.services.vault import crawl_vault
-    from mnemosyne.services.embed import _embed
     from rich.table import Table
 
+    from mnemosyne.services.embed import _embed
+    from mnemosyne.services.vault import crawl_vault
+
     notes = crawl_vault()
-    note_vectors = {note.path: _embed(note.title + " " + note.body[:500]) for note in notes}
+    note_vectors = {
+        note.path: _embed(note.title + " " + note.body[:500]) for note in notes
+    }
     suggestions = []
     for note in notes:
-        table = Table(title=f"Suggestions for {note.title} ({note.path})", show_header=True, header_style="bold")
+        table = Table(
+            title=f"Suggestions for {note.title} ({note.path})",
+            show_header=True,
+            header_style="bold",
+        )
         table.add_column("Score", width=6)
         table.add_column("Note Title", min_width=20)
         table.add_column("Path", min_width=20)
         table.add_column("Type", min_width=8)
         # Find related notes by cosine similarity
+        import numpy as np
         from numpy import dot
         from numpy.linalg import norm
-        import numpy as np
+
         v1 = np.array(note_vectors[note.path])
         related = []
         for other in notes:
@@ -276,7 +287,70 @@ def suggest_links_tags(
         if related:
             console.print(table)
         else:
-            console.print(f"[yellow]No suggestions for {note.title} ({note.path})[/yellow]")
+            console.print(
+                f"[yellow]No suggestions for {note.title} ({note.path})[/yellow]"
+            )
+
+@app.command()
+def suggest_tags(
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Apply tag suggestions without confirmation"
+    ),
+    vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
+    limit: int = typer.Option(5, "--limit", "-n", help="Max tag suggestions per note"),
+    threshold: float = typer.Option(
+        0.5, "--threshold", help="Semantic similarity threshold (0-1)"
+    ),
+):
+    """Suggest and optionally auto-apply tags for notes using semantic similarity."""
+    import os
+    if vault_path:
+        os.environ["VAULT_PATH"] = vault_path
+    from rich.table import Table
+    from mnemosyne.services.embed import _embed
+    from mnemosyne.services.vault import crawl_vault
+    from mnemosyne.services.writes import apply_plan, update_frontmatter
+    notes = crawl_vault()
+    note_vectors = {
+        note.path: _embed(note.title + " " + note.body[:500]) for note in notes
+    }
+    for note in notes:
+        import numpy as np
+        from numpy import dot
+        from numpy.linalg import norm
+        v1 = np.array(note_vectors[note.path])
+        suggested_tags = set(note.tags)
+        tag_sources = {}
+        for other in notes:
+            if other.path == note.path:
+                continue
+            v2 = np.array(note_vectors[other.path])
+            sim = dot(v1, v2) / (norm(v1) * norm(v2) + 1e-8)
+            if sim >= threshold:
+                for tag in other.tags:
+                    if tag and tag not in note.tags:
+                        suggested_tags.add(tag)
+                        tag_sources[tag] = (sim, other.path)
+        new_tags = [t for t in suggested_tags if t not in note.tags]
+        if new_tags:
+            table = Table(
+                title=f"Tag suggestions for {note.title} ({note.path})",
+                show_header=True,
+                header_style="bold",
+            )
+            table.add_column("Tag", min_width=12)
+            table.add_column("Score", width=6)
+            table.add_column("From Note", min_width=20)
+            for tag in new_tags:
+                sim, src = tag_sources.get(tag, ("", ""))
+                table.add_row(tag, f"{sim:.2f}" if sim else "", src)
+            console.print(table)
+            if yes or typer.confirm(f"Apply tags to {note.path}? [{', '.join(new_tags)}]"):
+                plan = update_frontmatter(note.path, {"tags": sorted(set(note.tags + new_tags))})
+                console.print(apply_plan(plan))
+        else:
+            console.print(f"[yellow]No new tag suggestions for {note.title} ({note.path})[/yellow]")
+
 
 @app.command()
 def organize(
