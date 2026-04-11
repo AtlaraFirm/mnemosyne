@@ -1,0 +1,33 @@
+# Python
+*.py[cod]
+*.pyo
+*.pyd
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+
+# Databases
+/db/
+
+# Logs
+vault-cli-audit.log
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Others
+*.swp
+.coverage
+build/
+uv.lock

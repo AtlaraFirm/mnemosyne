@@ -1,0 +1,49 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Pages
+        uses: actions/configure-pages@v4
+
+      - name: Build static site
+        run: |
+          mkdir -p docs
+          cp README.md docs/index.md
+          echo "---" >> docs/index.md
+          echo "# Mnemosyne" > docs/README.md
+          echo "Mnemosyne is a local-first Obsidian vault assistant with CLI, TUI, and Telegram bot interfaces. It helps you manage, search, and interact with your notes using local AI and embeddings.\n" >> docs/README.md
+          echo "## Features" >> docs/README.md
+          echo "- Local-first, privacy-focused" >> docs/README.md
+          echo "- CLI, TUI, and Telegram bot interfaces" >> docs/README.md
+          echo "- AI-powered search and note management" >> docs/README.md
+          echo "- Integrates with Ollama and Qdrant for embeddings and search" >> docs/README.md
+          echo "## Getting Started" >> docs/README.md
+          echo "1. Clone the repo and install dependencies" >> docs/README.md
+          echo "2. Run the CLI: \`python -m mnemosyne.frontends.cli\`" >> docs/README.md
+          echo "3. See the README for more details" >> docs/README.md
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v3
+
