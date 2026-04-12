@@ -84,6 +84,7 @@ class ChatApp(App):
 
     def on_mount(self):
         from mnemosyne.db.connection import init_db
+
         init_db()
         self.register_theme(VAULT_THEME)
         self.theme = "vault"
@@ -178,13 +179,17 @@ class ChatApp(App):
             emb.index_chunks(chunks)
             return len(chunks)
 
-        n = await self.run_in_thread(do_reindex)
+        n = do_reindex()
         try:
             conv.mount(
-                ChatMessage(f"[green]✓ Reindexed {n} chunks[/green]", classes="assistant")
+                ChatMessage(
+                    f"[green]✓ Reindexed {n} chunks[/green]", classes="assistant"
+                )
             )
         except MarkupError:
-            conv.mount(ChatMessage(escape(f"✓ Reindexed {n} chunks"), classes="assistant"))
+            conv.mount(
+                ChatMessage(escape(f"✓ Reindexed {n} chunks"), classes="assistant")
+            )
         conv.scroll_end(animate=False)
 
     async def action_clear(self):
