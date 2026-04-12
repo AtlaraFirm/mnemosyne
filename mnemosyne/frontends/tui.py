@@ -232,3 +232,8 @@ class ChatApp(App):
 def run_tui():
     app = ChatApp()
     app.run()
+
+if __name__ == "__main__":
+    run_tui()
+
+
