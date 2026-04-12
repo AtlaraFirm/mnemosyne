@@ -62,7 +62,7 @@ def semantic_search(query: str, limit: int = 5) -> list[SearchResult]:
     response = client.query_points(
         collection_name=settings.qdrant_collection,
         query=query_vector,
-        limit=limit,
+        limit=int(limit),
         with_payload=True,
     )
     hits = response.points
