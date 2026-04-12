@@ -83,6 +83,8 @@ class ChatApp(App):
         yield Footer()
 
     def on_mount(self):
+        from mnemosyne.db.connection import init_db
+        init_db()
         self.register_theme(VAULT_THEME)
         self.theme = "vault"
         self.query_one("#message-input").focus()

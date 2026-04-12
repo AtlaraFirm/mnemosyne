@@ -51,6 +51,9 @@ A local-first Obsidian vault assistant with CLI, TUI, and Telegram bot interface
    pip install -e .
    ```
 
+### Database Setup
+The database schema is created automatically on first run—no manual migration is needed. If you encounter errors about missing tables, ensure you are running the latest version and have started the app at least once via the CLI or TUI.
+
 ## Configuration
 
 - Edit `.env` to set your Obsidian vault path and other options.
