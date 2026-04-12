@@ -37,6 +37,27 @@ def history(
 
 
 @app.command()
+def flatten(
+    vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Flatten the vault: move all notes to root, delete all index.md files, and remove empty folders."""
+    import os
+    if vault_path:
+        os.environ["VAULT_PATH"] = vault_path
+    from mnemosyne.services.writes import flatten_vault
+    actions = flatten_vault()
+    if not actions:
+        console.print("[yellow]No changes made. Vault is already flat.[/yellow]")
+        return
+    for act in actions:
+        console.print(act)
+    if yes or typer.confirm("Apply these changes?"):
+        console.print("[green]✓ Vault flattened.[/green]")
+    else:
+        console.print("[yellow]No changes applied.[/yellow]")
+
+@app.command()
 def reindex(
     vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
 ):

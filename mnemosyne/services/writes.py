@@ -51,6 +51,11 @@ def create_note(
 
     norm_tags = [normalize_tag(t) for t in (tags or []) if t.strip()]
 
+    # Folder tags: add all parent folders as tags (lowercased, hyphenated)
+    folder_tags = []
+    if folder:
+        folder_tags = [normalize_tag(part) for part in folder.split("/") if part.strip()]
+    
     # Auto-tagging: extract top keywords from body (simple approach)
     STOPWORDS = set(
         [
@@ -167,7 +172,7 @@ def create_note(
     keywords = [w for w in words if w not in STOPWORDS]
     freq = Counter(keywords)
     auto_tags = [normalize_tag(w) for w, _ in freq.most_common(5) if w not in norm_tags]
-    all_tags = norm_tags + auto_tags
+    all_tags = sorted(set(norm_tags + folder_tags + auto_tags))
 
     # Auto-linking: add wikilinks for other note titles
     from mnemosyne.services.vault import get_note_titles
@@ -247,6 +252,44 @@ def update_frontmatter(path: str, updates: dict) -> WritePlan:
         payload={"abs_path": str(abs_path), "content": new_content},
     )
 
+
+def flatten_vault() -> list[str]:
+    """
+    Move all .md notes (except index.md) to the vault root, delete all index.md files, and remove all empty folders.
+    Update tags to remove old folder tags and add new ones.
+    Returns a list of actions performed.
+    """
+    from pathlib import Path
+    import os, shutil, frontmatter
+    actions = []
+    vault_root = _vault()
+    # 1. Move all .md notes (except index.md) to root
+    for md_file in vault_root.rglob("*.md"):
+        if md_file.name == "index.md":
+            continue
+        if md_file.parent == vault_root:
+            continue  # Already at root
+        dest = vault_root / md_file.name
+        orig_dest = dest
+        i = 1
+        while dest.exists():
+            dest = vault_root / f"{md_file.stem}_{i}.md"
+            i += 1
+        shutil.move(str(md_file), str(dest))
+        actions.append(f"Moved {md_file} -> {dest}")
+    # 2. Delete all index.md files
+    for idx_file in vault_root.rglob("index.md"):
+        idx_file.unlink()
+        actions.append(f"Deleted {idx_file}")
+    # 3. Remove all empty folders (bottom up)
+    for folder in sorted([p for p in vault_root.rglob("*") if p.is_dir()], key=lambda p: -len(str(p))):
+        try:
+            if not any(folder.iterdir()):
+                folder.rmdir()
+                actions.append(f"Removed empty folder {folder}")
+        except Exception:
+            pass
+    return actions
 
 def organize_notes(rules: dict = None) -> list[WritePlan]:
     """
