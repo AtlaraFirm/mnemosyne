@@ -33,7 +33,7 @@ class SearchResult(BaseModel):
 
 class WritePlan(BaseModel):
     plan_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
-    operation: Literal["create_note", "append_note", "prepend_note", "update_frontmatter"]
+    operation: Literal["create_note", "append_note", "prepend_note", "update_frontmatter", "move_note"]
     path: str
     preview: str
     payload: dict

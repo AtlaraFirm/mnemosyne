@@ -405,7 +405,63 @@ def organize(
             console.print(apply_plan(plan))
 
 
+@app.command()
+def backup(
+    dest: str = typer.Option(None, help="Backup destination directory (default: ./backups)"),
+    vault: str = typer.Option(None, help="Vault path (overrides config)"),
+):
+    """Backup the entire vault to a timestamped archive."""
+    import shutil, datetime
+    vault_path = vault or os.environ.get("VAULT_PATH") or os.getcwd()
+    vault_path = os.path.abspath(vault_path)
+    backup_dir = dest or os.path.join(os.getcwd(), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_name = f"vault-backup-{ts}.zip"
+    archive_path = os.path.join(backup_dir, archive_name)
+    shutil.make_archive(archive_path[:-4], 'zip', vault_path)
+    console.print(f"[green]✓ Vault backed up to {archive_path}[/green]")
+
+@app.command()
+def restore(
+    archive: str = typer.Argument(..., help="Path to backup archive (.zip)"),
+    vault: str = typer.Option(None, help="Vault path (overrides config)"),
+    yes: bool = typer.Option(False, '--yes', '-y', help="Overwrite vault without confirmation"),
+):
+    """Restore the vault from a backup archive."""
+    import shutil, zipfile
+    vault_path = vault or os.environ.get("VAULT_PATH") or os.getcwd()
+    vault_path = os.path.abspath(vault_path)
+    if not yes and not typer.confirm(f"This will overwrite the vault at {vault_path}. Continue?"):
+        raise typer.Exit()
+    with zipfile.ZipFile(archive, 'r') as zip_ref:
+        zip_ref.extractall(vault_path)
+    console.print(f"[green]✓ Vault restored from {archive} to {vault_path}[/green]")
+
+@app.command()
+def rollback(
+    backup_dir: str = typer.Option(None, help="Backup directory (default: ./backups)"),
+    vault: str = typer.Option(None, help="Vault path (overrides config)"),
+    yes: bool = typer.Option(False, '--yes', '-y', help="Overwrite vault without confirmation"),
+):
+    """Rollback the vault to the most recent backup archive."""
+    import glob, os
+    backup_dir = backup_dir or os.path.join(os.getcwd(), "backups")
+    archives = sorted(glob.glob(os.path.join(backup_dir, "vault-backup-*.zip")), reverse=True)
+    if not archives:
+        console.print(f"[red]No backups found in {backup_dir}[/red]"); raise typer.Exit()
+    archive = archives[0]
+    vault_path = vault or os.environ.get("VAULT_PATH") or os.getcwd()
+    vault_path = os.path.abspath(vault_path)
+    if not yes and not typer.confirm(f"This will overwrite the vault at {vault_path} with {archive}. Continue?"):
+        raise typer.Exit()
+    import zipfile
+    with zipfile.ZipFile(archive, 'r') as zip_ref:
+        zip_ref.extractall(vault_path)
+    console.print(f"[green]✓ Vault rolled back to {archive}[/green]")
+
 if __name__ == "__main__":
+
     import argparse
 
     from dotenv import load_dotenv

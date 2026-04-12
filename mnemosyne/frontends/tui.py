@@ -61,6 +61,7 @@ class ChatApp(App):
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit"),
         Binding("ctrl+r", "reindex", "Reindex"),
+        Binding("ctrl+o", "organize", "Organize Notes"),
         Binding("ctrl+l", "clear", "Clear chat"),
         Binding("escape", "reject_plan", "Reject plan"),
     ]
@@ -210,6 +211,28 @@ class ChatApp(App):
             conv.mount(
                 ChatMessage(escape(f"✓ Reindexed {n} chunks"), classes="assistant")
             )
+        conv.scroll_end(animate=False)
+
+    async def action_organize(self):
+        from mnemosyne.services.writes import organize_notes, apply_plan
+        conv = self.query_one("#conversation", VerticalScroll)
+        try:
+            conv.mount(ChatMessage("[dim]Organizing notes...[/dim]", classes="tool-call"))
+        except MarkupError:
+            conv.mount(ChatMessage(escape("Organizing notes..."), classes="tool-call"))
+        plans = organize_notes()
+        if not plans:
+            try:
+                conv.mount(ChatMessage("[green]No changes needed. Vault is already organized.[/green]", classes="assistant"))
+            except MarkupError:
+                conv.mount(ChatMessage(escape("No changes needed. Vault is already organized."), classes="assistant"))
+        else:
+            for plan in plans:
+                result = apply_plan(plan)
+                try:
+                    conv.mount(ChatMessage(f"[green]{result}[/green]", classes="assistant"))
+                except MarkupError:
+                    conv.mount(ChatMessage(escape(str(result)), classes="assistant"))
         conv.scroll_end(animate=False)
 
     async def action_clear(self):

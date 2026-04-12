@@ -248,21 +248,28 @@ def update_frontmatter(path: str, updates: dict) -> WritePlan:
     )
 
 
-def organize_notes() -> list[WritePlan]:
-    """Scan all notes and propose WritePlans for tagging, linking, cleanup, and index note creation.
-    Also scan for broken wikilinks and collect them for later fixing."""
+def organize_notes(rules: dict = None) -> list[WritePlan]:
+    """
+    Scan all notes and propose WritePlans for tagging, linking, cleanup, index note creation, and rules-based folder organization.
+    rules: dict, e.g. {"by": "tag"|"date"|"custom", ...}
+    """
     from mnemosyne.services.vault import crawl_vault, get_note_titles
+    import os
+    from pathlib import Path
+    import shutil
+    import re
+    import frontmatter
 
     notes = crawl_vault()
     note_titles = get_note_titles()
     note_paths = set(str(note.path)[:-3] if str(note.path).endswith('.md') else str(note.path) for note in notes)
     plans = []
     broken_links_report = []
+    rules = rules or {"by": "tag", "major_tags": ["project", "journal", "reference"]}
+
     # Organize individual notes
     for note in notes:
-        tags = [
-            t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags
-        ]
+        tags = [t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags]
         body = note.body
         IGNORE_LINK_TITLES = {'', ' '}
         for t in sorted(note_titles, key=len, reverse=True):
@@ -292,42 +299,82 @@ def organize_notes() -> list[WritePlan]:
             )
         # --- Broken wikilink detection ---
         for wikilink in getattr(note, 'wikilinks', []):
-            # Check if wikilink matches a note title or a note path (without .md)
             if wikilink not in note_titles and wikilink not in note_paths:
-                broken_links_report.append({
-                    'source': str(note.path),
-                    'wikilink': wikilink
-                })
+                broken_links_report.append({'source': str(note.path), 'wikilink': wikilink})
+
     # Optionally, write broken links to a file or log for later fixing
     if broken_links_report:
         import json
         report_path = _vault() / "broken_wikilinks_report.json"
         report_path.write_text(json.dumps(broken_links_report, indent=2), encoding="utf-8")
-    # Create/update index note in every directory, linking only to subdirectory indexes
-    import os
-    from pathlib import Path
 
+    # Rules-based folder organization
     vault_root = _vault()
+    if rules["by"] == "tag":
+        major_tags = set(rules.get("major_tags", ["project", "journal", "reference"]))
+        for note in notes:
+            if not note.tags:
+                continue
+            tag = note.tags[0].strip().lower().replace(" ", "-")
+            src_path = vault_root / note.path
+            if tag in major_tags:
+                dest_folder = vault_root / tag
+            else:
+                dest_folder = vault_root / "general"
+            dest_folder.mkdir(exist_ok=True)
+            dest_path = dest_folder / src_path.name
+            if src_path != dest_path:
+                plans.append(WritePlan(
+                    operation="move_note",
+                    path=str(src_path.relative_to(vault_root)),
+                    preview=f"MOVE {src_path} -> {dest_path}",
+                    payload={"src": str(src_path), "dst": str(dest_path)}
+                ))
+    elif rules["by"] == "date":
+        for note in notes:
+            date = note.frontmatter.get("created") or note.frontmatter.get("date")
+            if not date:
+                continue
+            year = date[:4]
+            src_path = vault_root / note.path
+            dest_folder = vault_root / year
+            dest_folder.mkdir(exist_ok=True)
+            dest_path = dest_folder / src_path.name
+            if src_path != dest_path:
+                plans.append(WritePlan(
+                    operation="move_note",
+                    path=str(src_path.relative_to(vault_root)),
+                    preview=f"MOVE {src_path} -> {dest_path}",
+                    payload={"src": str(src_path), "dst": str(dest_path)}
+                ))
+    # Add more rules as needed
+
+    # Create/update index note in every directory, linking only to subdirectory indexes
     for dirpath, dirnames, filenames in os.walk(vault_root):
         dirpath = Path(dirpath)
         subdirs = [d for d in dirnames if not d.startswith(".")]
         notes = [
-            f
-            for f in filenames
-            if f.endswith(".md") and f != "index.md" and not f.startswith(".")
+            f for f in filenames if f.endswith(".md") and f != "index.md" and not f.startswith(".")
         ]
         if not notes and not subdirs:
             continue
         lines = []
         for note in sorted(notes):
-            # Use full relative path from vault root for note links
             rel_note_path = (dirpath / note).relative_to(vault_root)
-            rel_note_path_str = str(rel_note_path)[:-3]  # remove .md
+            rel_note_path_str = str(rel_note_path)[:-3]
             lines.append(f"- [[{rel_note_path_str}]]")
+        # Group subdirectories by prefix (e.g., journal/2026/04)
+        grouped = {}
         for subdir in sorted(subdirs):
-            # Use full relative path for subdir index links
-            rel_subdir_index = (dirpath / subdir / "index").relative_to(vault_root)
-            lines.append(f"- [[{rel_subdir_index}]]")
+            parts = subdir.split("-")
+            prefix = parts[0] if len(parts) > 1 else subdir
+            grouped.setdefault(prefix, []).append(subdir)
+        for prefix, group in grouped.items():
+            if len(group) > 1:
+                lines.append(f"## {prefix}")
+            for subdir in group:
+                rel_subdir_index = (dirpath / subdir / "index").relative_to(vault_root)
+                lines.append(f"- [[{rel_subdir_index}]]")
         index_body = "# Index\n\n" + "\n".join(lines)
         index_tags = ["index"]
         index_path = dirpath / "index.md"
@@ -351,6 +398,33 @@ def organize_notes() -> list[WritePlan]:
 
 def apply_plan(plan: WritePlan) -> str:
     settings = get_settings()
+    if plan.operation == "move_note":
+        import shutil
+        src = Path(plan.payload["src"])
+        dst = Path(plan.payload["dst"])
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        # Audit log for move
+        vault_dir = Path(settings.vault_path).expanduser().resolve(strict=False)
+        try:
+            audit_log_path = Path(settings.audit_log_path)
+            if not audit_log_path.is_absolute():
+                audit_log_path = (vault_dir / audit_log_path).resolve(strict=False)
+            else:
+                audit_log_path = audit_log_path.expanduser().resolve(strict=False)
+            with open('/tmp/mnemosyne_audit_debug.log', 'a') as dbg:
+                dbg.write(f"vault_dir={vault_dir}\naudit_log_path={audit_log_path}\n")
+            audit_log_path.relative_to(vault_dir)
+        except Exception:
+            raise ValueError("audit_log_path must be inside the vault directory")
+        try:
+            audit_log_path.relative_to(vault_dir)
+        except ValueError:
+            raise ValueError("audit_log_path must be inside the vault directory")
+        audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(audit_log_path, "a") as f:
+            f.write(f"{datetime.utcnow().isoformat()}|move_note|{src}→{dst}\n")
+        return f"✓ Moved: {src} → {dst}"
     abs_path = Path(plan.payload["abs_path"])
     content = plan.payload["content"]
     if plan.operation == "create_note":
@@ -367,19 +441,15 @@ def apply_plan(plan: WritePlan) -> str:
             audit_log_path = (vault_dir / audit_log_path).resolve(strict=False)
         else:
             audit_log_path = audit_log_path.expanduser().resolve(strict=False)
-        # DEBUG: Write to file for subprocess visibility
         with open('/tmp/mnemosyne_audit_debug.log', 'a') as dbg:
             dbg.write(f"vault_dir={vault_dir}\naudit_log_path={audit_log_path}\n")
         audit_log_path.relative_to(vault_dir)
     except Exception:
         raise ValueError("audit_log_path must be inside the vault directory")
-
-    # Ensure audit_log_path is inside vault_dir (or is vault_dir itself)
     try:
         audit_log_path.relative_to(vault_dir)
     except ValueError:
         raise ValueError("audit_log_path must be inside the vault directory")
-
     audit_log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(audit_log_path, "a") as f:
         f.write(f"{datetime.utcnow().isoformat()}|{plan.operation}|{plan.path}\n")
