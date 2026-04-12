@@ -1,3 +1,11 @@
+---
+tags:
+- body
+- import
+- path
+- plantitle
+---
+
 # Vault CLI — Complete Design & Development Bible
 
 ## 1. Project Vision & Scope

@@ -1,3 +1,11 @@
+---
+tags:
+- body
+- check
+- plantitle
+- qdrant
+---
+
 # FAQ & Troubleshooting
 
 ## Why is Ollama not starting?

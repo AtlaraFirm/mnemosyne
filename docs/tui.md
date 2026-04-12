@@ -1,3 +1,11 @@
+---
+tags:
+- body
+- guide
+- plantitle
+- tui
+---
+
 # TUI Guide
 
 ## Overview

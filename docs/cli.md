@@ -1,3 +1,11 @@
+---
+tags:
+- ask
+- body
+- cli
+- plantitle
+---
+
 # CLI Guide
 
 ## Overview

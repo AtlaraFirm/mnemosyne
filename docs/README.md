@@ -1,5 +1,9 @@
 ---
-tags: []
+tags:
+- body
+- guide
+- mnemosyne
+- plantitle
 ---
 
 # Mnemosyne Documentation

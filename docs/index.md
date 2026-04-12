@@ -1,6 +1,10 @@
 ---
 tags:
+- body
+- guide
 - index
+- plantitle
+- readme
 title: Index
 ---
 

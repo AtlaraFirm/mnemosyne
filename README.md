@@ -1,3 +1,11 @@
+---
+tags:
+- body
+- mnemosyne
+- plantitle
+- tui
+---
+
 # Mnemosyne
 
 A local-first Obsidian vault assistant with CLI, TUI, and Telegram bot interfaces. All AI runs locally via Ollama. No cloud, no accounts, no lock-in.
