@@ -13,6 +13,7 @@ mnemosyne/agent/schemas.py
 mnemosyne/agent/tools.py
 mnemosyne/db/connection.py
 mnemosyne/frontends/cli.py
+mnemosyne/frontends/organize.py
 mnemosyne/frontends/telegram_bot.py
 mnemosyne/frontends/tui.py
 mnemosyne/services/embed.py
@@ -23,10 +24,12 @@ mnemosyne/services/writes.py
 tests/test_agent_tools.py
 tests/test_audit_log_path.py
 tests/test_cli.py
+tests/test_cli_markup.py
 tests/test_e2e_cli.py
 tests/test_edge_security.py
 tests/test_embed.py
 tests/test_index.py
 tests/test_related.py
+tests/test_suggest_links_tags.py
 tests/test_vault.py
 tests/test_writes.py
