@@ -98,6 +98,9 @@ class ChatApp(App):
         await self._send_message()
 
     async def _send_message(self):
+        import logging
+        logging.basicConfig(filename='debug.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
+        logging.debug('_send_message called')
         input_widget = self.query_one("#message-input", Input)
         message = input_widget.value.strip()
         if not message:
@@ -112,36 +115,51 @@ class ChatApp(App):
         conv.scroll_end(animate=False)
 
         try:
+            logging.debug('Entering agent stream block')
             history = get_history("local")
             content = ""
             msg_widget = ChatMessage("", classes="assistant")
             conv.mount(msg_widget)
             conv.scroll_end(animate=False)
+            # Show typing indicator
+            typing_widget = ChatMessage("[dim]AI is typing...[/dim]", classes="tool-call typing-indicator")
+            conv.mount(typing_widget)
+            conv.scroll_end(animate=False)
 
             async def update_content(new_content):
+                logging.debug(f'update_content called with: {new_content!r}')
                 try:
                     msg_widget.update(new_content)
                 except MarkupError:
                     msg_widget.update(escape(new_content))
                 conv.scroll_end(animate=False)
 
-            # Use async for for streaming agent
-            async for chunk in agent_run_stream(message, history):
-                if chunk["type"] == "content":
-                    content = chunk["content"]
-                    await update_content(content)
-                elif chunk["type"] == "tool_call":
-                    tool_line = "  ".join(
-                        f"[🔍 {t.get('function', {}).get('name', '?')}]"
-                        for t in chunk["tool_calls"]
-                    )
+            # --- PATCH: Use non-streaming agent ---
+            try:
+                from mnemosyne.agent.loop import run as agent_run
+                response = agent_run(message, history)
+                content = response.text
+                await update_content(content)
+                # Show tool calls if any
+                if getattr(response, 'tool_calls_made', None):
+                    tool_line = "  ".join(f"[🔍 {name}]" for name in response.tool_calls_made)
                     try:
                         conv.mount(ChatMessage(tool_line, classes="tool-call"))
                     except MarkupError:
                         conv.mount(ChatMessage(escape(tool_line), classes="tool-call"))
                     conv.scroll_end(animate=False)
-                elif chunk["type"] == "done":
-                    break
+                # Show write plans if any
+                if getattr(response, 'write_plans', None):
+                    for plan in response.write_plans:
+                        preview = plan.preview[:400] + ("..." if len(plan.preview) > 400 else "")
+                        conv.mount(ChatMessage(f"[yellow]Proposed: {plan.operation}[/yellow]\n[path]{plan.path}[/path]\n\n[dim]{preview}[/dim]", classes="tool-call"))
+                        conv.scroll_end(animate=False)
+            except Exception as stream_exc:
+                logging.exception(f'Exception in agent_run: {stream_exc}')
+            # Remove typing indicator
+            for w in conv.children:
+                if getattr(w, "classes", None) and "typing-indicator" in w.classes:
+                    await w.remove()
             save_messages(
                 "local",
                 "tui",
@@ -150,6 +168,8 @@ class ChatApp(App):
                     {"role": "assistant", "content": content},
                 ],
             )
+            logging.debug('Exiting agent stream block')
+            # --- END PATCH ---
         except Exception as e:
             conv.mount(ChatMessage(f"[red]Error: {e}[/red]", classes="error"))
         finally:

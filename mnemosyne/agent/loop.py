@@ -85,17 +85,22 @@ def _run_stream_sync(message: str, history: list[dict]):
     )
     partial_content = ""
 
+    import logging
+    logging.basicConfig(filename='debug.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
+    logging.debug('Entering _run_stream_sync')
     for chunk in ollama.chat(
         model=settings.chat_model,
         messages=messages,
         tools=TOOLS,
         stream=True,
     ):
+        logging.debug(f'ollama.chat yielded chunk: {chunk}')
         if chunk.get("content"):
             partial_content += chunk["content"]
             yield {"type": "content", "content": partial_content}
         if chunk.get("tool_calls"):
             yield {"type": "tool_call", "tool_calls": chunk["tool_calls"]}
+    logging.debug('Yielding done chunk from _run_stream_sync')
     yield {"type": "done", "content": partial_content}
 
 

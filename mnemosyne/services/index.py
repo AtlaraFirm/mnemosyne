@@ -60,6 +60,10 @@ def upsert_chunks(chunks: list[Chunk]):
         conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
 
 def search_fts(query: str, limit: int = 5) -> list[SearchResult]:
+    import logging
+    logging.basicConfig(filename='debug.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
+    logging.debug(f"search_fts called with query type: {type(query)}, value: {query}")
+    assert isinstance(query, str), f"search_fts: query must be str, got {type(query)}: {query}"
     with _conn() as conn:
         rows = conn.execute("""
             SELECT c.id, c.note_path, c.note_title, c.heading, c.text, rank

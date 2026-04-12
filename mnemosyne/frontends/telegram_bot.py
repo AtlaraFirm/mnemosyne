@@ -165,6 +165,14 @@ async def cmd_reindex(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import logging
+    logging.basicConfig(filename='debug.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
+    logging.debug(f"handle_message called: chat_id={update.effective_chat.id}, text={getattr(update.message, 'text', None)}")
+    # Show typing indicator while processing
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    except Exception:
+        pass
     try:
         if not _is_allowed(update.effective_chat.id):
             return
@@ -182,6 +190,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         def do_agent():
             return agent_run(text, history)
 
+        # --- PATCH: Use non-streaming agent ---
         response = await loop.run_in_executor(None, do_agent)
         save_messages(
             chat_id,
@@ -192,39 +201,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ],
         )
         reply = response.text
-        if response.tool_calls_made:
+        if getattr(response, 'tool_calls_made', None):
             reply += f"\n\n_Tools: {', '.join(response.tool_calls_made)}_"
-        await update.message.reply_markdown(reply)
-        for plan in response.write_plans:
-            async with _pending_plans_lock:
-                _pending_plans[plan.plan_id] = plan
-            keyboard = InlineKeyboardMarkup(
-                [
+        try:
+            await update.message.reply_markdown(reply)
+        except Exception as e:
+            logger.exception("Error sending markdown reply")
+            await update.message.reply_text(reply)
+        if getattr(response, 'write_plans', None):
+            for plan in response.write_plans:
+                async with _pending_plans_lock:
+                    _pending_plans[plan.plan_id] = plan
+                keyboard = InlineKeyboardMarkup(
                     [
-                        InlineKeyboardButton(
-                            "✅ Apply", callback_data=f"apply:{plan.plan_id}"
-                        ),
-                        InlineKeyboardButton(
-                            "❌ Reject", callback_data=f"reject:{plan.plan_id}"
-                        ),
+                        [
+                            InlineKeyboardButton(
+                                "✅ Apply", callback_data=f"apply:{plan.plan_id}"
+                            ),
+                            InlineKeyboardButton(
+                                "❌ Reject", callback_data=f"reject:{plan.plan_id}"
+                            ),
+                        ]
                     ]
-                ]
-            )
-            preview = plan.preview[:400] + ("..." if len(plan.preview) > 400 else "")
-            await update.message.reply_text(
-                f"**Proposed: {plan.operation}**\n`{plan.path}`\n\n```\n{preview}\n```",
-                reply_markup=keyboard,
-                parse_mode="Markdown",
-            )
+                )
+                preview = plan.preview[:400] + ("..." if len(plan.preview) > 400 else "")
+                await update.message.reply_text(
+                    f"**Proposed: {plan.operation}**\n`{plan.path}`\n\n```\n{preview}\n```",
+                    reply_markup=keyboard,
+                    parse_mode="Markdown",
+                )
+        # --- END PATCH ---
     except Exception:
         logger.exception("Error in handle_message")
         await update.message.reply_text("An error occurred. Please try again later.")
-        preview = plan.preview[:400] + ("..." if len(plan.preview) > 400 else "")
-        await update.message.reply_text(
-            f"**Proposed: {plan.operation}**\n`{plan.path}`\n\n```\n{preview}\n```",
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,3 +276,6 @@ def run_bot():
     app.add_handler(CallbackQueryHandler(handle_callback))
     logger.info("Mnemosyne bot starting...")
     app.run_polling()
+
+if __name__ == "__main__":
+    run_bot()

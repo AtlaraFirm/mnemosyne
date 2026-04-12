@@ -7,6 +7,12 @@ from mnemosyne.config import get_settings
 import json
 
 def search_notes(query: str, limit: int = 5) -> str:
+    # Final safety: coerce query to string if not already
+    if isinstance(query, dict):
+        import json
+        query = json.dumps(query)
+    elif not isinstance(query, str):
+        query = str(query)
     results = idx_svc.search_fts(query, limit)
     if not results:
         return "No notes found matching that query."
@@ -60,8 +66,35 @@ TOOLS = [
 
 TOOL_MAP = {fn.__name__: fn for fn in TOOLS}
 
+import inspect
+
 def dispatch(name: str, arguments: dict) -> str:
     fn = TOOL_MAP.get(name)
     if not fn:
         return f"Unknown tool: {name}"
-    return fn(**arguments)
+    sig = inspect.signature(fn)
+    filtered_args = {}
+    import logging
+    logging.basicConfig(filename='debug.log', level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
+    logging.debug(f"Dispatching tool '{name}' with arguments: {arguments}")
+    for k, v in arguments.items():
+        if k in sig.parameters:
+            param = sig.parameters[k]
+            logging.debug(f"Param: {k}, Expected: {param.annotation}, Value: {v}, Type: {type(v)}")
+            # Coerce argument to expected type if possible
+            expected_type = param.annotation
+            if expected_type is not inspect._empty and not isinstance(v, expected_type):
+                try:
+                    # Special handling: if expecting str and value is dict, use json.dumps
+                    if expected_type is str and isinstance(v, dict):
+                        import json
+                        filtered_args[k] = json.dumps(v)
+                    else:
+                        filtered_args[k] = expected_type(v)
+                except Exception:
+                    filtered_args[k] = str(v) if expected_type is str else v  # fallback
+            else:
+                filtered_args[k] = v
+    logging.debug(f"Filtered args for '{name}': {filtered_args}")
+    return fn(**filtered_args)
+

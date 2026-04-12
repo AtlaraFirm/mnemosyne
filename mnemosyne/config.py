@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_host: str = "http://localhost:11434"
-    chat_model: str = "llama3.2"
+    chat_model: str = "ministral-3:latest"
     embed_model: str = "nomic-embed-text"
     agent_max_iterations: int = 8
 
