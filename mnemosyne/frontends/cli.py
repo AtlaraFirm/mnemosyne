@@ -308,7 +308,9 @@ def suggest_tags(
         0.5, "--threshold", help="Semantic similarity threshold (0-1)"
     ),
 ):
-    """Suggest tags for notes using semantic similarity. Optionally auto-apply with --mode apply."""
+    """Suggest tags for notes using semantic similarity. Optionally auto-apply with --mode apply and --yes for no confirmation (like organize).
+    Example: mnemosyne suggest-tags --mode apply --yes
+    """
     import os
     if vault_path:
         os.environ["VAULT_PATH"] = vault_path
@@ -330,15 +332,16 @@ def suggest_tags(
         suggested_tags = set([t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags])
         tag_sources = {}
         # 1. Semantic similarity to other notes' tags
+        TRIVIAL_TAGS = {"index", "note", "notes", "untitled", "test", "todo", "draft"}
+        STOPWORDS = set([
+            "the", "and", "for", "are", "but", "not", "you", "with", "that", "this", "was", "have", "from", "they", "his", "her", "she", "him", "all", "can", "had", "one", "has", "were", "their", "what", "when", "your", "out", "use", "how", "which", "will", "each", "about", "many", "then", "them", "these", "some", "would", "make", "like", "himself", "herself", "into", "more", "other", "could", "our", "there", "been", "if", "no", "than", "so", "may", "on", "in", "to", "of", "a", "an", "is", "it", "as", "at", "by", "be", "or", "we", "do", "did", "does", "up", "down", "over", "under", "again", "very", "just", "any", "now", "who", "where", "why", "because", "while", "between", "both", "few", "most", "such", "own", "same", "too", "s", "t", "can", "will", "don", "should", "ll", "d", "re", "ve", "m"
+        ])
         for other in notes:
             if other.path == note.path:
                 continue
             v2 = np.array(note_vectors[other.path])
             sim = dot(v1, v2) / (norm(v1) * norm(v2) + 1e-8)
-            TRIVIAL_TAGS = {"index", "note", "notes", "untitled", "test", "todo", "draft"}
-            STOPWORDS = set([
-                "the", "and", "for", "are", "but", "not", "you", "with", "that", "this", "was", "have", "from", "they", "his", "her", "she", "him", "all", "can", "had", "one", "has", "were", "their", "what", "when", "your", "out", "use", "how", "which", "will", "each", "about", "many", "then", "them", "these", "some", "would", "make", "like", "himself", "herself", "into", "more", "other", "could", "our", "there", "been", "if", "no", "than", "so", "may", "on", "in", "to", "of", "a", "an", "is", "it", "as", "at", "by", "be", "or", "we", "do", "did", "does", "up", "down", "over", "under", "again", "very", "just", "any", "now", "who", "where", "why", "because", "while", "between", "both", "few", "most", "such", "own", "same", "too", "s", "t", "can", "will", "don", "should", "ll", "d", "re", "ve", "m"
-            ])
+
             if sim >= threshold:
                 for tag in other.tags:
                     tag_norm = tag.strip().lower().replace(" ", "-").replace("_", "-")
