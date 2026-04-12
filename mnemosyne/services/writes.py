@@ -351,46 +351,7 @@ def organize_notes(rules: dict = None) -> list[WritePlan]:
         report_path = _vault() / "broken_wikilinks_report.json"
         report_path.write_text(json.dumps(broken_links_report, indent=2), encoding="utf-8")
 
-    # Rules-based folder organization
     vault_root = _vault()
-    if rules["by"] == "tag":
-        major_tags = set(rules.get("major_tags", ["project", "journal", "reference"]))
-        for note in notes:
-            if not note.tags:
-                continue
-            tag = note.tags[0].strip().lower().replace(" ", "-")
-            src_path = vault_root / note.path
-            if tag in major_tags:
-                dest_folder = vault_root / tag
-            else:
-                dest_folder = vault_root / "general"
-            dest_folder.mkdir(exist_ok=True)
-            dest_path = dest_folder / src_path.name
-            if src_path != dest_path:
-                plans.append(WritePlan(
-                    operation="move_note",
-                    path=str(src_path.relative_to(vault_root)),
-                    preview=f"MOVE {src_path} -> {dest_path}",
-                    payload={"src": str(src_path), "dst": str(dest_path)}
-                ))
-    elif rules["by"] == "date":
-        for note in notes:
-            date = note.frontmatter.get("created") or note.frontmatter.get("date")
-            if not date:
-                continue
-            year = date[:4]
-            src_path = vault_root / note.path
-            dest_folder = vault_root / year
-            dest_folder.mkdir(exist_ok=True)
-            dest_path = dest_folder / src_path.name
-            if src_path != dest_path:
-                plans.append(WritePlan(
-                    operation="move_note",
-                    path=str(src_path.relative_to(vault_root)),
-                    preview=f"MOVE {src_path} -> {dest_path}",
-                    payload={"src": str(src_path), "dst": str(dest_path)}
-                ))
-    # Add more rules as needed
 
     # Create/update index note in every directory, linking only to subdirectory indexes
     for dirpath, dirnames, filenames in os.walk(vault_root):
