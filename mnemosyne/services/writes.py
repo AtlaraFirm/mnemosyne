@@ -291,6 +291,45 @@ def flatten_vault() -> list[str]:
             pass
     return actions
 
+def sweep_links(fix: bool = True) -> list[dict]:
+    """
+    Sweep all notes for broken links. If fix=True, attempt to fix or remove broken links.
+    Returns a report of actions taken or issues found.
+    """
+    from mnemosyne.services.vault import crawl_vault, get_note_titles
+    import frontmatter
+    import os
+    from pathlib import Path
+    vault_root = _vault()
+    notes = crawl_vault()
+    note_titles = get_note_titles()
+    note_paths = set(str(note.path)[:-3] if str(note.path).endswith('.md') else str(note.path) for note in notes)
+    actions = []
+    for note in notes:
+        path = vault_root / note.path
+        post = frontmatter.load(str(path))
+        content = post.content if hasattr(post, 'content') else ""
+        changed = False
+        # Find all wikilinks
+        wikilinks = set(re.findall(r"\[\[([^\]]+)\]\]", content))
+        for wikilink in wikilinks:
+            if wikilink not in note_titles and wikilink not in note_paths:
+                if fix:
+                    # Remove broken link
+                    content_new = re.sub(rf"\[\[\s*{re.escape(wikilink)}\s*\]\]", "", content)
+                    if content_new != content:
+                        content = content_new
+                        changed = True
+                        actions.append({'action': 'removed', 'note': str(note.path), 'wikilink': wikilink})
+                else:
+                    actions.append({'action': 'broken', 'note': str(note.path), 'wikilink': wikilink})
+        if changed and fix:
+            post.content = content
+            post.metadata['tags'] = [t for t in post.metadata.get('tags', [])]
+            post_new = frontmatter.dumps(post)
+            path.write_text(post_new, encoding="utf-8")
+    return actions
+
 def organize_notes(rules: dict = None) -> list[WritePlan]:
     """
     Scan all notes and propose WritePlans for tagging, linking, cleanup, index note creation, and rules-based folder organization.

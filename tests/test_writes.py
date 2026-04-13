@@ -61,6 +61,25 @@ def test_wikilink_cleanup(tmp_path):
             assert any(link in content for link in ["[[folder2/NoteC]]", "[[folder2/index]]", "[[folder1/NoteB]]", "[[folder1/index]]"])
     assert found_index
 
+def test_sweep_links(tmp_path):
+    import os
+    os.environ["VAULT_PATH"] = str(tmp_path)
+    from mnemosyne.services import writes
+    # Create notes
+    note_a = tmp_path / "NoteA.md"
+    note_a.write_text("---\ntitle: NoteA\n---\n\nSee [[NoteB]] and [[MissingNote]].")
+    note_b = tmp_path / "NoteB.md"
+    note_b.write_text("---\ntitle: NoteB\n---\n\nBody")
+    # Sweep with fix
+    actions = writes.sweep_links(fix=True)
+    # MissingNote link should be removed
+    content_a = note_a.read_text()
+    assert "[[MissingNote]]" not in content_a
+    assert any(a['wikilink'] == 'MissingNote' and a['action'] == 'removed' for a in actions)
+    # Sweep with fix=False (should find no broken links now)
+    actions2 = writes.sweep_links(fix=False)
+    assert not any(a['action'] == 'broken' for a in actions2)
+
 def test_apply_plan(tmp_path):
     import os
     os.environ["VAULT_PATH"] = str(tmp_path)
