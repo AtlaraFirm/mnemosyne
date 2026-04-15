@@ -380,9 +380,8 @@ def suggest_links(
             console.print(table)
             if mode == "apply":
                 related_titles = [title for _, title, _, typ in related if typ == "wikilink"]
-                # Always add/update the Related section in apply mode, even if empty (for test consistency)
+                # In apply mode, only update the Related section at the end, do not insert links into the body
                 if mode == "apply":
-                    # Always update Related section, even if empty
                     plan = append_note(note.path, "", related_titles=related_titles or [])
                     from rich.syntax import Syntax
                     console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
@@ -473,7 +472,7 @@ def suggest_links_tags(
             console.print(
                 f"[yellow]No suggestions for {note.title} ({note.path})[/yellow]"
             )
-        # Always update the Related section in apply mode, even if no related links are found
+        # In apply mode, only update the Related section at the end, do not insert links into the body
         if mode == "apply":
             from mnemosyne.services.writes import append_note, apply_plan
             plan = append_note(note.path, "", related_titles=related_titles or [])

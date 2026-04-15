@@ -366,11 +366,14 @@ def organize_notes(rules: dict = None) -> list[WritePlan]:
         tags = [t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags]
         body = note.body
         IGNORE_LINK_TITLES = {'', ' '}
-        for t in sorted(note_titles, key=len, reverse=True):
-            if not t or not t.strip() or t in IGNORE_LINK_TITLES:
-                continue
-            if t != note.title and t in body and f"[[{t}]]" not in body:
-                body = re.sub(rf"(?<!\[\[)\b{re.escape(t)}\b(?!\]\])", f"[[{t}]]", body)
+        # Only insert wikilinks into the body if not running suggest_links or suggest_links_tags in apply mode
+        insert_links_in_body = not (os.environ.get("MNEMO_SUGGEST_LINKS_APPLY") == "1")
+        if insert_links_in_body:
+            for t in sorted(note_titles, key=len, reverse=True):
+                if not t or not t.strip() or t in IGNORE_LINK_TITLES:
+                    continue
+                if t != note.title and t in body and f"[[{t}]]" not in body:
+                    body = re.sub(rf"(?<!\[\[)\b{re.escape(t)}\b(?!\]\])", f"[[{t}]]", body)
         # Strip empty/whitespace-only wikilinks from body
         body = _strip_empty_wikilinks(body)
         tags = sorted(set(tags))
