@@ -206,22 +206,24 @@ def create_note(
     )
 
 
-def _insert_or_update_related_section(content: str, related_titles: list[str]) -> str:
+def _insert_or_update_related_section(content: str, related_links: list[dict]) -> str:
     """
-    Insert or update a '## Related' section at the end of the note with wikilinks to related_titles.
+    Insert or update a '## Related' section at the end of the note with wikilinks to related notes using their paths.
+    related_links: list of dicts with at least 'title' and 'path' keys.
     """
     import re
-    related_section = "\n## Related\n" + "\n".join(f"- [[{title}]]" for title in related_titles) + "\n"
+    # Always use the note path for the link, not just the title
+    related_section = "\n## Related\n" + "\n".join(f"- [[{link['path']}|{link['title']}]]" for link in related_links) + "\n"
     # Remove any existing Related section
     content = re.sub(r"\n## Related\n(.|\n)*$", "", content, flags=re.MULTILINE)
     return content.rstrip() + related_section
 
-def append_note(path: str, text: str, section: Optional[str] = None, related_titles: Optional[list[str]] = None) -> WritePlan:
+def append_note(path: str, text: str, section: Optional[str] = None, related_links: Optional[list[dict]] = None) -> WritePlan:
     abs_path = _vault() / path
     original = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
     new_content = original.rstrip() + f"\n\n{text}\n"
-    if related_titles is not None:
-        new_content = _insert_or_update_related_section(new_content, related_titles)
+    if related_links is not None:
+        new_content = _insert_or_update_related_section(new_content, related_links)
     diff = "\n".join(
         difflib.unified_diff(
             original.splitlines(),

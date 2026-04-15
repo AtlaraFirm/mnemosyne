@@ -379,17 +379,28 @@ def suggest_links(
         if related:
             console.print(table)
             if mode == "apply":
-                related_titles = [title for _, title, _, typ in related if typ == "wikilink"]
+                related_links = [
+                    {"title": title, "path": path}
+                    for _, title, path, typ in related if typ == "wikilink"
+                ]
+                # Always use the note path for related links
+                for link in related_links:
+                    if 'path' in link:
+                        link['path'] = link['path']  # Ensure path is used, not title
                 # In apply mode, only update the Related section at the end, do not insert links into the body
                 if mode == "apply":
-                    plan = append_note(note.path, "", related_titles=related_titles or [])
+                    plan = append_note(note.path, "", related_links=related_links or [])
                     from rich.syntax import Syntax
                     console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
-                    if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join(related_titles)}]"):
+                    if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join([l['title'] for l in related_links])}]"):
                         console.print(apply_plan(plan))
-                elif related_titles:
-                    if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join(related_titles)}]"):
-                        plan = append_note(note.path, "", related_titles=related_titles)
+                elif related_links:
+                    if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join([l['title'] for l in related_links])}]"):
+                        # Always use the note path for related links
+for link in related_links:
+    if 'path' in link:
+        link['path'] = link['path']  # Ensure path is used, not title
+plan = append_note(note.path, "", related_links=related_links)
                         from rich.syntax import Syntax
                         console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
                         if yes or typer.confirm("Apply?"):
@@ -475,7 +486,15 @@ def suggest_links_tags(
         # In apply mode, only update the Related section at the end, do not insert links into the body
         if mode == "apply":
             from mnemosyne.services.writes import append_note, apply_plan
-            plan = append_note(note.path, "", related_titles=related_titles or [])
+            related_links = [
+                {"title": title, "path": path}
+                for _, title, path, typ in related if typ == "wikilink"
+            ]
+            # Always use the note path for related links
+            for link in related_links:
+                if 'path' in link:
+                    link['path'] = link['path']  # Ensure path is used, not title
+            plan = append_note(note.path, "", related_links=related_links or [])
             from rich.syntax import Syntax
             console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
             if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join(related_titles)}]"):
