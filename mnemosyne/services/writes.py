@@ -206,10 +206,22 @@ def create_note(
     )
 
 
-def append_note(path: str, text: str, section: Optional[str] = None) -> WritePlan:
+def _insert_or_update_related_section(content: str, related_titles: list[str]) -> str:
+    """
+    Insert or update a '## Related' section at the end of the note with wikilinks to related_titles.
+    """
+    import re
+    related_section = "\n## Related\n" + "\n".join(f"- [[{title}]]" for title in related_titles) + "\n"
+    # Remove any existing Related section
+    content = re.sub(r"\n## Related\n(.|\n)*$", "", content, flags=re.MULTILINE)
+    return content.rstrip() + related_section
+
+def append_note(path: str, text: str, section: Optional[str] = None, related_titles: Optional[list[str]] = None) -> WritePlan:
     abs_path = _vault() / path
     original = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
     new_content = original.rstrip() + f"\n\n{text}\n"
+    if related_titles is not None:
+        new_content = _insert_or_update_related_section(new_content, related_titles)
     diff = "\n".join(
         difflib.unified_diff(
             original.splitlines(),

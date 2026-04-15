@@ -4,7 +4,7 @@ from mnemosyne.config import get_settings
 from pathlib import Path
 
 
-def find_related(path: str, limit: int = 5, threshold: float = 0.5) -> list[dict]:
+def find_related(path: str, limit: int = 5, threshold: float = 0.7) -> list[dict]:
     settings = get_settings()
     abs_path = Path(settings.vault_path) / path
     try:

@@ -6,5 +6,6 @@ class S(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "allow"
 
 print(S().TELEGRAM_ALLOWED_CHAT_IDS)

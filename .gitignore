@@ -31,3 +31,4 @@ vault-cli-audit.log
 .coverage
 build/
 uv.lock
+backups/

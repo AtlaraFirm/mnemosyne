@@ -17,7 +17,7 @@ def vault(tmp_path_factory):
 
 def test_suggest_links_tags(vault):
     subprocess.run(CLI + ['reindex', '--vault', str(vault)], check=True)
-    result = subprocess.run(CLI + ['suggest-links-tags', '--vault', str(vault), '--limit', '2', '--threshold', '0.1'], capture_output=True, text=True)
+    result = subprocess.run(CLI + ['suggest-links-tags', '--vault', str(vault), '--limit', '2', '--threshold', '0.1', '--mode', 'apply', '--yes'], capture_output=True, text=True)
     assert 'Suggestions for' in result.stdout
     assert 'wikilink' in result.stdout or 'tag' in result.stdout
     # Ensure trivial tags are not suggested
@@ -26,6 +26,12 @@ def test_suggest_links_tags(vault):
     assert '| note |' not in result.stdout and '| note |' not in result.stderr
     assert 'the' not in result.stdout
     assert 'and' not in result.stdout
+
+    # Check that the Related section is present in the modified note
+    note1_path = vault / 'note1.md'
+    content = note1_path.read_text()
+    assert '## Related' in content
+    assert '[[' in content.split('## Related')[-1]  # At least one wikilink in Related section
 
 def test_suggest_tags_modes(vault):
     subprocess.run(CLI + ['reindex', '--vault', str(vault)], check=True)

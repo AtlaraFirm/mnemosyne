@@ -37,6 +37,77 @@ def history(
 
 
 @app.command()
+def sort_inbox(
+    vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
+    threshold: float = typer.Option(0.7, "--threshold", help="Confidence threshold (0-1)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show actions without moving files"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Move files without confirmation"),
+):
+    """Sort files from the inbox folder into their most likely destination based on confidence score."""
+    import os
+    from pathlib import Path
+    from rich.table import Table
+    from mnemosyne.services.vault import crawl_vault
+    from mnemosyne.services.embed import _embed
+    from shutil import move
+
+    if vault_path:
+        os.environ["VAULT_PATH"] = vault_path
+    settings = __import__("mnemosyne.config").config.get_settings()
+    vault = Path(settings.vault_path)
+    inbox = vault / "inbox"
+    if not inbox.exists() or not inbox.is_dir():
+        console.print(f"[red]Inbox folder not found: {inbox}[/red]")
+        raise typer.Exit(1)
+
+    files = list(inbox.glob("*"))
+    if not files:
+        console.print("[yellow]No files in inbox.[/yellow]")
+        raise typer.Exit()
+
+    notes = crawl_vault()
+    note_vectors = {note.path: _embed(note.title + " " + note.body[:500]) for note in notes}
+    folders = set(Path(note.path).parent for note in notes if Path(note.path).parent != inbox)
+
+    for file in files:
+        if not file.is_file():
+            continue
+        with open(file, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(1000)
+        file_vec = _embed(file.stem + " " + content)
+        best_folder = None
+        best_score = -1
+        for folder in folders:
+            folder_vecs = [note_vectors[note.path] for note in notes if Path(note.path).parent == folder]
+            if not folder_vecs:
+                continue
+            # Average similarity to all notes in folder
+            import numpy as np
+            sims = [np.dot(file_vec, vec) / (np.linalg.norm(file_vec) * np.linalg.norm(vec)) for vec in folder_vecs]
+            score = float(np.mean(sims))
+            if score > best_score:
+                best_score = score
+                best_folder = folder
+        table = Table(title=f"{file.name}")
+        table.add_column("Destination")
+        table.add_column("Score")
+        if best_folder and best_score >= threshold:
+            try:
+                rel_folder = str(best_folder.relative_to(vault))
+            except ValueError:
+                rel_folder = str(best_folder)
+            table.add_row(rel_folder, f"{best_score:.2f}")
+            console.print(table)
+            if not dry_run:
+                if yes or typer.confirm(f"Move {file.name} to {rel_folder}?"):
+                    dest = best_folder / file.name
+                    move(str(file), str(dest))
+                    console.print(f"[green]Moved {file.name} to {rel_folder}[/green]")
+        else:
+            table.add_row("[yellow]No confident match[/yellow]", f"{best_score:.2f}")
+            console.print(table)
+
+@app.command()
 def flatten(
     vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
@@ -249,11 +320,98 @@ def bot():
 
 
 @app.command()
+def suggest_links(
+    vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
+    limit: int = typer.Option(5, "--limit", "-n", help="Max link suggestions per note"),
+    threshold: float = typer.Option(
+        0.7, "--threshold", help="Semantic similarity threshold (0-1)"
+    ),
+    mode: str = typer.Option(
+        "suggest", "--mode", "-m", help="Mode: 'suggest' to only suggest, 'apply' to auto-apply"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Apply suggestions without confirmation (only relevant if --mode apply)"
+    ),
+):
+    """Suggest new wikilinks for notes using semantic similarity. Optionally auto-apply with --mode apply and --yes for no confirmation."""
+    import os
+
+    if vault_path:
+        os.environ["VAULT_PATH"] = vault_path
+    from rich.table import Table
+    from mnemosyne.services.embed import _embed
+    from mnemosyne.services.vault import crawl_vault
+    from mnemosyne.services.writes import apply_plan, append_note
+
+    notes = crawl_vault()
+    note_vectors = {
+        note.path: _embed(note.title + " " + note.body[:500]) for note in notes
+    }
+    for note in notes:
+        table = Table(
+            title=f"Suggestions for {note.title} ({note.path})",
+            show_header=True,
+            header_style="bold",
+        )
+        table.add_column("Score", width=6)
+        table.add_column("Note Title", min_width=20)
+        table.add_column("Path", min_width=20)
+        table.add_column("Type", min_width=8)
+        # Find related notes by cosine similarity
+        import numpy as np
+        from numpy import dot
+        from numpy.linalg import norm
+
+        v1 = np.array(note_vectors[note.path])
+        related = []
+        for other in notes:
+            if other.path == note.path:
+                continue
+            v2 = np.array(note_vectors[other.path])
+            sim = dot(v1, v2) / (norm(v1) * norm(v2) + 1e-8)
+            # Suggest wikilink if not already present
+            if other.title not in note.wikilinks and sim >= threshold:
+                related.append((sim, other.title, other.path, "wikilink"))
+        # Sort and limit
+        related = sorted(related, key=lambda x: -x[0])[:limit]
+        for sim, value, path, typ in related:
+            table.add_row(f"{sim:.2f}", value, path, typ)
+        if related:
+            console.print(table)
+            if mode == "apply":
+                related_titles = [title for _, title, _, typ in related if typ == "wikilink"]
+                # Always add/update the Related section in apply mode, even if empty (for test consistency)
+                if mode == "apply":
+                    # Always update Related section, even if empty
+                    plan = append_note(note.path, "", related_titles=related_titles or [])
+                    from rich.syntax import Syntax
+                    console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
+                    if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join(related_titles)}]"):
+                        console.print(apply_plan(plan))
+                elif related_titles:
+                    if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join(related_titles)}]"):
+                        plan = append_note(note.path, "", related_titles=related_titles)
+                        from rich.syntax import Syntax
+                        console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
+                        if yes or typer.confirm("Apply?"):
+                            console.print(apply_plan(plan))
+        else:
+            console.print(
+                f"[yellow]No link suggestions for {note.title} ({note.path})[/yellow]"
+            )
+
+@app.command()
 def suggest_links_tags(
     vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
     limit: int = typer.Option(5, "--limit", "-n", help="Max suggestions per note"),
     threshold: float = typer.Option(
-        0.5, "--threshold", help="Semantic similarity threshold (0-1)"
+        0.7, "--threshold", help="Semantic similarity threshold (0-1)"
+    ),
+    mode: str = typer.Option(
+        "suggest", "--mode", "-m", help="Mode: 'suggest' to only suggest, 'apply' to auto-apply"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Apply suggestions without confirmation (only relevant if --mode apply)"
     ),
 ):
     """Suggest new wikilinks and tags for notes using semantic similarity (no direct modification)."""
@@ -308,12 +466,21 @@ def suggest_links_tags(
         related = sorted(related, key=lambda x: -x[0])[:limit]
         for sim, value, path, typ in related:
             table.add_row(f"{sim:.2f}", value, path, typ)
+        related_titles = [title for _, title, _, typ in related if typ == "wikilink"]
         if related:
             console.print(table)
         else:
             console.print(
                 f"[yellow]No suggestions for {note.title} ({note.path})[/yellow]"
             )
+        # Always update the Related section in apply mode, even if no related links are found
+        if mode == "apply":
+            from mnemosyne.services.writes import append_note, apply_plan
+            plan = append_note(note.path, "", related_titles=related_titles or [])
+            from rich.syntax import Syntax
+            console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
+            if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join(related_titles)}]"):
+                console.print(apply_plan(plan))
 
 @app.command()
 def suggest_tags(
@@ -326,7 +493,7 @@ def suggest_tags(
     vault_path: str = typer.Option(None, "--vault", "-v", help="Path to vault root"),
     limit: int = typer.Option(5, "--limit", "-n", help="Max tag suggestions per note"),
     threshold: float = typer.Option(
-        0.5, "--threshold", help="Semantic similarity threshold (0-1)"
+        0.7, "--threshold", help="Semantic similarity threshold (0-1)"
     ),
 ):
     """Suggest tags for notes using semantic similarity. Optionally auto-apply with --mode apply and --yes for no confirmation (like organize).

@@ -55,7 +55,7 @@ def index_chunks(chunks: list[Chunk], batch_size: int = 50):
         client.upsert(collection_name=settings.qdrant_collection, points=points)
 
 
-def semantic_search(query: str, limit: int = 5) -> list[SearchResult]:
+def semantic_search(query: str, limit: int = 3) -> list[SearchResult]:
     settings = get_settings()
     client = _qdrant()
     query_vector = _embed(query)
