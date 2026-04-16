@@ -348,6 +348,8 @@ def suggest_links(
         note.path: _embed(note.title + " " + note.body[:500]) for note in notes
     }
     for note in notes:
+        if not note.body or not note.body.strip():
+            continue
         table = Table(
             title=f"Suggestions for {note.title} ({note.path})",
             show_header=True,
@@ -397,10 +399,10 @@ def suggest_links(
                 elif related_links:
                     if yes or typer.confirm(f"Apply related links to {note.path}? [{', '.join([l['title'] for l in related_links])}]"):
                         # Always use the note path for related links
-for link in related_links:
-    if 'path' in link:
-        link['path'] = link['path']  # Ensure path is used, not title
-plan = append_note(note.path, "", related_links=related_links)
+                        for link in related_links:
+                            if 'path' in link:
+                                link['path'] = link['path']  # Ensure path is used, not title
+                        plan = append_note(note.path, "", related_links=related_links)
                         from rich.syntax import Syntax
                         console.print(Syntax(plan.preview, "diff", theme="ansi_dark"))
                         if yes or typer.confirm("Apply?"):
@@ -440,6 +442,8 @@ def suggest_links_tags(
     }
     suggestions = []
     for note in notes:
+        if not note.body or not note.body.strip():
+            continue
         table = Table(
             title=f"Suggestions for {note.title} ({note.path})",
             show_header=True,
@@ -529,6 +533,9 @@ def suggest_tags(
         note.path: _embed(note.title + " " + note.body[:500]) for note in notes
     }
     for note in notes:
+        # Skip notes with empty or whitespace-only bodies (see issue #skip-empty-body)
+        if not note.body or not note.body.strip():
+            continue
         import numpy as np
         from numpy import dot
         from numpy.linalg import norm

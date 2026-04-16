@@ -11,6 +11,7 @@ def vault(tmp_path_factory):
     (vault / 'note1.md').write_text('# Note 1\nApple orange banana.')
     (vault / 'note2.md').write_text('# Note 2\nBanana fruit salad.')
     (vault / 'note3.md').write_text('# Note 3\nUnrelated content.')
+    (vault / 'empty.md').write_text('# Empty\n   \n')
     db_path = vault / 'test.db'
     os.environ['DB_PATH'] = str(db_path)
     return vault
@@ -32,6 +33,14 @@ def test_suggest_links_tags(vault):
     content = note1_path.read_text()
     assert '## Related' in content
     assert '[[' in content.split('## Related')[-1]  # At least one wikilink in Related section
+
+    # Ensure no suggestions for empty note
+    result_empty = subprocess.run(CLI + ['suggest-links-tags', '--vault', str(vault), '--limit', '2', '--threshold', '0.1'], capture_output=True, text=True)
+    assert 'Suggestions for Empty' not in result_empty.stdout
+
+    # Also check suggest-tags
+    result_tags = subprocess.run(CLI + ['suggest-tags', '--vault', str(vault), '--limit', '2', '--threshold', '0.1'], capture_output=True, text=True)
+    assert 'Tag suggestions for Empty' not in result_tags.stdout
 
 def test_suggest_tags_modes(vault):
     subprocess.run(CLI + ['reindex', '--vault', str(vault)], check=True)
