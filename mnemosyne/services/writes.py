@@ -19,9 +19,28 @@ def _strip_empty_wikilinks(text: str) -> str:
     # Replace [[   ]] or [[\t]] or [[ ]] (empty/whitespace-only wikilinks) with a single space
     return re.sub(r"\[\[\s*\]\]", " ", text)
 
+def _is_body_effectively_empty(body: str) -> bool:
+    # Returns True if body is empty, whitespace, or only comments (lines starting with # or // or <!-- ... -->)
+    if not body or not body.strip():
+        return True
+    # Remove HTML comments
+    body_wo_html_comments = re.sub(r'<!--.*?-->', '', body, flags=re.DOTALL)
+    # Remove lines that are only comments
+    lines = [line for line in body_wo_html_comments.splitlines() if line.strip() and not line.strip().startswith('#') and not line.strip().startswith('//')]
+    # If nothing left, it's empty or only comments
+    return not any(line.strip() for line in lines)
+
 def create_note(
     title: str, body: str, folder: str = "", tags: list[str] = []
 ) -> WritePlan:
+    # Suppress tags, related links, and Related section if body is empty or only comments
+    if _is_body_effectively_empty(body):
+        tags = []
+        body = ""
+        suppress_related = True
+    else:
+        suppress_related = False
+
     # Input validation
     if not title or not title.strip():
         raise ValueError("Note title cannot be empty.")
@@ -49,6 +68,23 @@ def create_note(
     def normalize_tag(tag):
         return tag.strip().lower().replace(" ", "-").replace("_", "-")
 
+    # If body is empty/whitespace/comments, do not insert tags, related links, or Related section
+    if _is_body_effectively_empty(body):
+        norm_tags = []
+        folder_tags = []
+        auto_tags = []
+        all_tags = []
+        body_linked = ""
+        fm = {"title": title, "created": datetime.utcnow().isoformat(), "tags": all_tags}
+        post = frontmatter.Post(body_linked, **fm)
+        preview = f"CREATE {rel_path}\n\n{frontmatter.dumps(post)}"
+        return WritePlan(
+            operation="create_note",
+            path=rel_path,
+            preview=preview,
+            payload={"abs_path": str(abs_path), "content": frontmatter.dumps(post)},
+        )
+
     norm_tags = [normalize_tag(t) for t in (tags or []) if t.strip()]
 
     # Folder tags: add all parent folders as tags (lowercased, hyphenated)
@@ -56,8 +92,20 @@ def create_note(
     if folder:
         folder_tags = [normalize_tag(part) for part in folder.split("/") if part.strip()]
     
-    # Auto-tagging: extract top keywords from body (simple approach)
-    STOPWORDS = set(
+    # Suppress auto/folder tags for empty/trivial notes
+    def is_trivial_note(text: str) -> bool:
+        # Empty, whitespace, or only comments (lines starting with # or //)
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        if not lines:
+            return True
+        return all(l.startswith('#') or l.startswith('//') for l in lines)
+
+    if is_trivial_note(body):
+        folder_tags = []
+        auto_tags = []
+    else:
+        # Auto-tagging: extract top keywords from body (simple approach)
+        STOPWORDS = set(
         [
             "the",
             "and",
@@ -206,24 +254,32 @@ def create_note(
     )
 
 
-def _insert_or_update_related_section(content: str, related_links: list[dict]) -> str:
+def _insert_or_update_related_section(content: str, related_links: list[dict], suppress: bool = False) -> str:
     """
     Insert or update a '## Related' section at the end of the note with wikilinks to related notes using their paths.
     related_links: list of dicts with at least 'title' and 'path' keys.
+    Do NOT insert the Related section if it would be the only content in the note.
     """
     import re
+    # Remove any existing Related section
+    content_wo_related = re.sub(r"\n## Related\n(.|\n)*$", "", content, flags=re.MULTILINE).rstrip()
+    # If the note would be empty or only whitespace, do not insert Related section
+    if not content_wo_related.strip():
+        return content_wo_related
     # Always use the note path for the link, not just the title
     related_section = "\n## Related\n" + "\n".join(f"- [[{link['path']}|{link['title']}]]" for link in related_links) + "\n"
-    # Remove any existing Related section
-    content = re.sub(r"\n## Related\n(.|\n)*$", "", content, flags=re.MULTILINE)
-    return content.rstrip() + related_section
+    return content_wo_related + related_section
 
 def append_note(path: str, text: str, section: Optional[str] = None, related_links: Optional[list[dict]] = None) -> WritePlan:
     abs_path = _vault() / path
     original = abs_path.read_text(encoding="utf-8") if abs_path.exists() else ""
-    new_content = original.rstrip() + f"\n\n{text}\n"
-    if related_links is not None:
-        new_content = _insert_or_update_related_section(new_content, related_links)
+    # If text is empty/whitespace/comments, do not insert related links or Related section
+    if _is_body_effectively_empty(text):
+        new_content = original.rstrip() + f"\n\n{text}\n"
+    else:
+        new_content = original.rstrip() + f"\n\n{text}\n"
+        if related_links is not None:
+            new_content = _insert_or_update_related_section(new_content, related_links, suppress=_is_body_effectively_empty(text))
     diff = "\n".join(
         difflib.unified_diff(
             original.splitlines(),
@@ -367,7 +423,7 @@ def organize_notes(rules: dict = None) -> list[WritePlan]:
     for note in notes:
         tags = [t.strip().lower().replace(" ", "-").replace("_", "-") for t in note.tags]
         body = note.body
-        IGNORE_LINK_TITLES = {'', ' '}
+        IGNORE_LINK_TITLES = {'', ' ', 'a', 'h', 'an', 'the', 'and', 'or', 'but', 'if', 'then', 'else', 'when', 'at', 'by', 'for', 'with', 'without', 'on', 'in', 'to', 'of', 'b'}
         # Only insert wikilinks into the body if not running suggest_links or suggest_links_tags in apply mode
         insert_links_in_body = not (os.environ.get("MNEMO_SUGGEST_LINKS_APPLY") == "1")
         if insert_links_in_body:
